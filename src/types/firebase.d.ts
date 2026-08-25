@@ -29,6 +29,18 @@ declare module 'firebase/firestore' {
   export type Firestore = any;
 }
 
+declare module 'firebase/database' {
+  export function getDatabase(app?: any, url?: string): any;
+  export function ref(database: any, path?: string): any;
+  export function set(reference: any, value: any): Promise<void>;
+  export function get(reference: any): Promise<any>;
+  export function update(reference: any, values: any): Promise<void>;
+  export function push(reference: any, value?: any): any;
+  export function onValue(reference: any, callback: (snapshot: any) => void, cancelCallback?: (error: any) => void): () => void;
+  export function child(reference: any, path: string): any;
+  export type Database = any;
+}
+
 declare module 'firebase/storage' {
   export function getStorage(app?: any): any;
   export function ref(storage: any, url?: string): any;

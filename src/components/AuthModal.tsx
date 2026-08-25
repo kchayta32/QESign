@@ -44,7 +44,7 @@ export default function AuthModal({
   onClose,
   defaultTab = "register",
 }: AuthModalProps) {
-  const { setCurrentStudent, setCurrentTeacher, setRole, selectStudentById, selectTeacherById } = useAuth();
+  const { setCurrentStudent, setRole, selectStudentById, selectTeacherById } = useAuth();
   const [tab, setTab] = useState<"login" | "register">(defaultTab);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -67,6 +67,8 @@ export default function AuthModal({
   const [trackId, setTrackId] = useState<TrackType>("SW");
   const [yearLevel, setYearLevel] = useState<number>(4);
   const [advisorId, setAdvisorId] = useState<string>(teachers[0]?.id || "T-101");
+  const [isCustomAdvisor, setIsCustomAdvisor] = useState<boolean>(false);
+  const [customAdvisorName, setCustomAdvisorName] = useState<string>("");
   const [projectTitleTh, setProjectTitleTh] = useState("");
   const [projectTitleEn, setProjectTitleEn] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string>(PRESET_AVATARS[0]);
@@ -116,6 +118,8 @@ export default function AuthModal({
     }
 
     setIsLoading(true);
+    const chosenAdvisorId = isCustomAdvisor && customAdvisorName ? `CUSTOM-${customAdvisorName}` : advisorId;
+
     const res = await registerStudentAccount({
       studentCode,
       prefixTh,
@@ -128,7 +132,7 @@ export default function AuthModal({
       phone: phone || "089-000-0000",
       trackId,
       yearLevel,
-      advisorId,
+      advisorId: chosenAdvisorId,
       projectTitleTh: projectTitleTh || "โครงงานวิศวกรรมคอมพิวเตอร์",
       projectTitleEn: projectTitleEn || "Computer Engineering Project",
       avatarUrl,
@@ -136,7 +140,7 @@ export default function AuthModal({
 
     setIsLoading(false);
     if (res.success && res.student) {
-      setSuccessMessage("ลงทะเบียนสมาชิกใหม่สำเร็จ! ยินดีต้อนรับเข้าสู่ระบบ");
+      setSuccessMessage("ลงทะเบียนสมาชิกใหม่สำเร็จ! บันทึกข้อมูลลง Realtime Database เรียบร้อย");
       setCurrentStudent(res.student);
       setRole("student");
       setTimeout(() => {
@@ -195,7 +199,7 @@ export default function AuthModal({
                 </h3>
               </div>
               <p className="text-xs text-neutral-500">
-                SSRU Computer Engineering Identity &amp; Access Portal
+                SSRU Computer Engineering Identity &amp; Realtime Database Portal
               </p>
             </div>
           </div>
@@ -273,7 +277,6 @@ export default function AuthModal({
                 </label>
 
                 <div className="flex flex-col sm:flex-row items-center gap-4">
-                  {/* Current Avatar Preview */}
                   <div className="relative">
                     <img
                       src={avatarUrl}
@@ -285,7 +288,6 @@ export default function AuthModal({
                     </div>
                   </div>
 
-                  {/* Upload or Choose from Preset */}
                   <div className="space-y-2 flex-1 w-full">
                     <div className="flex items-center gap-2">
                       <label className="px-3 py-1.5 rounded-xl bg-white border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-100 cursor-pointer flex items-center gap-1.5 shadow-sm transition-colors">
@@ -301,7 +303,6 @@ export default function AuthModal({
                       <span className="text-[11px] text-neutral-400">หรือเลือกรูปเริ่มต้น:</span>
                     </div>
 
-                    {/* Presets */}
                     <div className="flex items-center gap-2 overflow-x-auto py-1">
                       {PRESET_AVATARS.map((url, i) => (
                         <img
@@ -323,7 +324,6 @@ export default function AuthModal({
 
               {/* Personal Info Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                {/* Prefix */}
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">คำนำหน้า</label>
                   <select
@@ -337,7 +337,6 @@ export default function AuthModal({
                   </select>
                 </div>
 
-                {/* First Name TH */}
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">ชื่อ (ภาษาไทย) *</label>
                   <input
@@ -350,7 +349,6 @@ export default function AuthModal({
                   />
                 </div>
 
-                {/* Last Name TH */}
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-neutral-700 mb-1">นามสกุล (ภาษาไทย) *</label>
                   <input
@@ -393,7 +391,6 @@ export default function AuthModal({
                   />
                 </div>
 
-                {/* Password with visibility toggle */}
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     รหัสผ่าน (Password) *
@@ -418,7 +415,7 @@ export default function AuthModal({
                 </div>
               </div>
 
-              {/* Track, Year, Advisor */}
+              {/* Track, Year, Official Advisor (6 Teachers + Other) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Track */}
                 <div>
@@ -453,24 +450,54 @@ export default function AuthModal({
                   </select>
                 </div>
 
-                {/* Advisor */}
+                {/* Official Advisor Selection (6 Faculty Members + Other) */}
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     อาจารย์ที่ปรึกษาโครงงาน *
                   </label>
                   <select
-                    value={advisorId}
-                    onChange={(e) => setAdvisorId(e.target.value)}
-                    className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5"
+                    value={isCustomAdvisor ? "OTHER" : advisorId}
+                    onChange={(e) => {
+                      if (e.target.value === "OTHER") {
+                        setIsCustomAdvisor(true);
+                      } else {
+                        setIsCustomAdvisor(false);
+                        setAdvisorId(e.target.value);
+                      }
+                    }}
+                    className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5 font-medium"
                   >
-                    {teachers.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.prefixTh}{t.firstNameTh} {t.lastNameTh} ({t.teacherCode})
-                      </option>
-                    ))}
+                    <option value="T-101">1. ผศ.ดร.ขวัญเรือน รัศมี</option>
+                    <option value="T-102">2. ผศ.ดร.พรภวิษย์ บุญศรีเมือง</option>
+                    <option value="T-103">3. ผศ.ดร.รวิ อุตตมธนินทร์</option>
+                    <option value="T-104">4. อ.กานต์ เจริญจิตร</option>
+                    <option value="T-105">5. อ.ดร.พงศ์ระพี แก้วไทรฮะ</option>
+                    <option value="T-106">6. ผศ.ดร.เศรษฐกาล โปร่งนุช</option>
+                    <option value="OTHER">อื่นๆ ระบุ ....................</option>
                   </select>
                 </div>
               </div>
+
+              {/* Custom Advisor Name input if Other is selected */}
+              {isCustomAdvisor && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  className="p-3 rounded-2xl bg-ssru-50/60 border border-ssru-crimson/30 space-y-1"
+                >
+                  <label className="block text-xs font-bold text-ssru-crimson">
+                    ระบุชื่อ-สกุล และตำแหน่งทางวิชาการของอาจารย์ที่ปรึกษา (อื่นๆ) *
+                  </label>
+                  <input
+                    type="text"
+                    value={customAdvisorName}
+                    onChange={(e) => setCustomAdvisorName(e.target.value)}
+                    placeholder="เช่น ดร.สมศักดิ์ วงศ์วิศวกร (อาจารย์พิเศษ)"
+                    className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20"
+                    required={isCustomAdvisor}
+                  />
+                </motion.div>
+              )}
 
               {/* Project Title */}
               <div>
@@ -493,7 +520,7 @@ export default function AuthModal({
                 className="w-full py-3 bg-gradient-to-r from-ssru-crimson to-ssru-dark hover:from-ssru-600 hover:to-ssru-900 text-white rounded-xl text-xs md:text-sm font-bold shadow-md shadow-ssru-crimson/20 flex items-center justify-center space-x-2 active:scale-98 transition-all"
               >
                 {isLoading ? (
-                  <span>กำลังบันทึกข้อมูลสมาชิก...</span>
+                  <span>กำลังบันทึกลง Realtime Database...</span>
                 ) : (
                   <>
                     <UserPlus className="w-4 h-4" />
@@ -515,7 +542,7 @@ export default function AuthModal({
                   type="text"
                   value={loginIdentifier}
                   onChange={(e) => setLoginIdentifier(e.target.value)}
-                  placeholder="เช่น 64122010023 หรือ surachai.ek@ssru.ac.th"
+                  placeholder="เช่น 64122010023 หรือ kwanruen.ra@ssru.ac.th"
                   className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20"
                   required
                 />
@@ -597,7 +624,7 @@ export default function AuthModal({
                     }}
                     className="p-2.5 rounded-xl bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 text-left"
                   >
-                    <span className="font-bold text-neutral-charcoal block">ผศ.ดร.สุรชัย</span>
+                    <span className="font-bold text-neutral-charcoal block">ผศ.ดร.ขวัญเรือน</span>
                     <span className="text-[10px] text-ssru-crimson">กรรมการสอบ / ที่ปรึกษา</span>
                   </button>
 

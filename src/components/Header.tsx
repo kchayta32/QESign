@@ -14,7 +14,8 @@ import {
   LogOut,
   UserCog,
   Building2,
-  BookOpen
+  BookOpen,
+  Radio
 } from "lucide-react";
 import AuthModal from "./AuthModal";
 import ProfileEditModal from "./ProfileEditModal";
@@ -63,6 +64,13 @@ export default function Header() {
                 สาขาวิชาวิศวกรรมคอมพิวเตอร์ คณะเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยราชภัฏสวนสุนันทา
               </span>
               <span className="sm:hidden font-medium">มรภ.สวนสุนันทา (วิศวกรรมคอมพิวเตอร์)</span>
+
+              {/* Realtime Live Sync Dot */}
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/25 text-emerald-200 border border-emerald-400/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="hidden md:inline">Realtime Database Sync Active</span>
+                <span className="md:hidden">Live RTDB</span>
+              </span>
             </div>
 
             <div className="flex items-center space-x-2.5 text-xs">
@@ -289,7 +297,7 @@ export default function Header() {
                     <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-neutral-200 py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                       <div className="px-3 py-1.5 border-b border-neutral-100">
                         <p className="text-[11px] font-semibold text-neutral-400 uppercase">
-                          สลับบัญชีอาจารย์กรรมการ
+                          สลับบัญชีอาจารย์กรรมการ (6 ท่าน)
                         </p>
                       </div>
                       {allTeachers.map((t) => (

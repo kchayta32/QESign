@@ -25,7 +25,8 @@ import {
   BookOpen,
   Send,
   Building2,
-  ChevronRight
+  ChevronRight,
+  Radio
 } from "lucide-react";
 import { QEBooking, TrackType } from "@/types";
 
@@ -44,10 +45,15 @@ export default function StudentDashboard() {
   const latestBooking = studentBookings[0];
   const qeResult = dbStore.getQEResultByStudent(currentStudent.id);
   const teachers = dbStore.getTeachers();
-  const advisor = teachers.find((t) => t.id === currentStudent.advisorId) || teachers[0];
+  const advisor = teachers.find((t) => t.id === currentStudent.advisorId);
+  const advisorDisplayName = currentStudent.advisorId?.startsWith("CUSTOM-")
+    ? currentStudent.advisorId.replace("CUSTOM-", "")
+    : advisor
+    ? `${advisor.prefixTh}${advisor.firstNameTh} ${advisor.lastNameTh}`
+    : "ผศ.ดร.ขวัญเรือน รัศมี";
 
   const handleBookingSuccess = (booking: QEBooking) => {
-    // State will be synced via context & localStorage
+    // State will be synced via context & Realtime Database
   };
 
   return (
@@ -69,6 +75,10 @@ export default function StudentDashboard() {
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-700">
                   Track: {currentStudent.trackId}
                 </span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Realtime Sync</span>
+                </span>
               </div>
               <h2 className="text-lg md:text-2xl font-bold font-display text-neutral-charcoal leading-tight">
                 {currentStudent.prefixTh} {currentStudent.firstNameTh} {currentStudent.lastNameTh}
@@ -84,7 +94,7 @@ export default function StudentDashboard() {
             <div className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200/80 text-xs">
               <span className="text-neutral-400 block">อาจารย์ที่ปรึกษา:</span>
               <span className="font-bold text-neutral-charcoal">
-                {advisor?.prefixTh} {advisor?.firstNameTh} {advisor?.lastNameTh}
+                {advisorDisplayName}
               </span>
             </div>
 

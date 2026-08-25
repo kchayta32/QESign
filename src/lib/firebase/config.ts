@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
+import { getDatabase, Database } from "firebase/database";
 import { getStorage, FirebaseStorage } from "firebase/storage";
 import { getAnalytics, isSupported, Analytics } from "firebase/analytics";
 
@@ -19,6 +20,7 @@ const firebaseConfig = {
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
+let rtdb: Database;
 let storage: FirebaseStorage;
 let analytics: Analytics | undefined;
 
@@ -26,6 +28,7 @@ try {
   app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
+  rtdb = getDatabase(app, firebaseConfig.databaseURL);
   storage = getStorage(app);
 
   if (typeof window !== "undefined") {
@@ -39,4 +42,4 @@ try {
   console.warn("Firebase initialization warning (running in safe mode):", error);
 }
 
-export { app, auth, db, storage, analytics, firebaseConfig };
+export { app, auth, db, rtdb, storage, analytics, firebaseConfig };

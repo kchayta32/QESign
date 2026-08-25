@@ -56,13 +56,17 @@ export default function QEBookingModal({
 
     setIsSubmitting(true);
     setTimeout(() => {
-      // Find 3 examiners for the track
       const teachers = dbStore.getTeachers();
-      const examiner1 = teachers[0]?.firstNameTh ? `${teachers[0].prefixTh} ${teachers[0].firstNameTh} ${teachers[0].lastNameTh}` : "ผศ.สมเกียรติ พงษ์ศิริ";
-      const examiner2 = teachers[1]?.firstNameTh ? `${teachers[1].prefixTh} ${teachers[1].firstNameTh} ${teachers[1].lastNameTh}` : "ผศ.ดร.สุรชัย เอกอนันต์";
-      const examiner3 = teachers[2]?.firstNameTh ? `${teachers[2].prefixTh} ${teachers[2].firstNameTh} ${teachers[2].lastNameTh}` : "ผศ.ดร.นพวรรณ สถิตสถาพร";
+      const defaultIds = currentTrack.examinersDefault || ["T-101", "T-104", "T-105"];
+      const t1 = teachers.find((t) => t.id === defaultIds[0]) || teachers[0];
+      const t2 = teachers.find((t) => t.id === defaultIds[1]) || teachers[1];
+      const t3 = teachers.find((t) => t.id === defaultIds[2]) || teachers[2];
 
-      const examinerIds: [string, string, string] = [teachers[0]?.id || "T-101", teachers[1]?.id || "T-102", teachers[2]?.id || "T-103"];
+      const examiner1 = `${t1.prefixTh}${t1.firstNameTh} ${t1.lastNameTh}`;
+      const examiner2 = `${t2.prefixTh}${t2.firstNameTh} ${t2.lastNameTh}`;
+      const examiner3 = `${t3.prefixTh}${t3.firstNameTh} ${t3.lastNameTh}`;
+
+      const examinerIds: [string, string, string] = [t1.id, t2.id, t3.id];
       const examinerNames: [string, string, string] = [examiner1, examiner2, examiner3];
 
       const newBooking = dbStore.createQEBooking({
@@ -265,7 +269,7 @@ export default function QEBookingModal({
               <span>คณะกรรมการสอบ QE ประจำแทร็ก ({currentTrack.nameTh})</span>
             </div>
             <p className="text-[11px] text-neutral-600">
-              ระบบจะจัดกรรมการ 3 ท่านสำหรับประเมินผลสอบตามเกณฑ์มติ 2 ใน 3 เสียง
+              ระบบจัดกรรมการ 3 ท่านจากคณาจารย์ประจำสาขาวิชา สำหรับประเมินผลสอบตามเกณฑ์มติ 2 ใน 3 เสียง
             </p>
           </div>
 
