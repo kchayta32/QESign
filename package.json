@@ -1,11 +1,11 @@
 {
-  "name": "ssru-ce-qe-system",
+  "name": "qe-sign",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next dev",
-    "build": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next build",
-    "start": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next start",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "lint": "next lint",
     "test:rules": "node scripts/test-rules.js"
   },
@@ -20,7 +20,6 @@
     "tailwind-merge": "^2.3.0"
   },
   "devDependencies": {
-    "@next/swc-win32-x64-msvc": "^14.2.3",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
