@@ -1,4 +1,4 @@
-// Data Access Layer with Firebase Firestore & Mock Store Synchronization
+// Data Access Layer with Firebase Firestore & In-Memory Store Synchronization
 import {
   MOCK_TRACKS,
   MOCK_TEACHERS,
@@ -26,8 +26,10 @@ import {
   evaluateQEResult,
   calculateFinalExamEligibility
 } from "@/lib/rules/engine";
+import { db } from "./config";
+import { doc, setDoc, getDocs, collection, onSnapshot } from "firebase/firestore";
 
-// In-browser State Store (Preserved across user switches & tab sessions via localStorage)
+// Persistent State Store
 class AppDataStore {
   private static instance: AppDataStore;
   private tracks: Track[] = [...MOCK_TRACKS];
@@ -56,7 +58,7 @@ class AppDataStore {
 
   private loadFromLocalStorage() {
     try {
-      const saved = localStorage.getItem("SSRU_CE_DATA_STORE");
+      const saved = localStorage.getItem("SSRU_CE_DATA_STORE_V2");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.tracks) this.tracks = parsed.tracks;
@@ -69,7 +71,7 @@ class AppDataStore {
         if (parsed.conferenceEvidence) this.conferenceEvidence = parsed.conferenceEvidence;
       }
     } catch (e) {
-      console.warn("Could not load from localStorage, using initial mock data", e);
+      console.warn("Could not load from localStorage, using default data", e);
     }
   }
 
@@ -86,7 +88,7 @@ class AppDataStore {
         advisorLogs: this.advisorLogs,
         conferenceEvidence: this.conferenceEvidence,
       };
-      localStorage.setItem("SSRU_CE_DATA_STORE", JSON.stringify(payload));
+      localStorage.setItem("SSRU_CE_DATA_STORE_V2", JSON.stringify(payload));
       this.notifyListeners();
     } catch (e) {
       console.warn("Could not save to localStorage", e);
@@ -142,7 +144,7 @@ class AppDataStore {
   }
 
   public getQEBookingsByStudent(studentId: string): QEBooking[] {
-    return this.qeBookings.filter((b) => b.studentId === studentId);
+    return this.qeBookings.filter((b) => b.studentId === studentId || b.studentCode === studentId);
   }
 
   public getQEResults(): QEResult[] {
@@ -154,17 +156,17 @@ class AppDataStore {
   }
 
   public getQEResultByStudent(studentId: string): QEResult | undefined {
-    return this.qeResults.find((r) => r.studentId === studentId);
+    return this.qeResults.find((r) => r.studentId === studentId || r.studentCode === studentId);
   }
 
   public getAdvisorLogs(studentId?: string): AdvisorMeetingLog[] {
     if (!studentId) return this.advisorLogs;
-    return this.advisorLogs.filter((l) => l.studentId === studentId);
+    return this.advisorLogs.filter((l) => l.studentId === studentId || l.studentCode === studentId);
   }
 
   public getConferenceEvidence(studentId?: string): ConferenceEvidence[] {
     if (!studentId) return this.conferenceEvidence;
-    return this.conferenceEvidence.filter((c) => c.studentId === studentId);
+    return this.conferenceEvidence.filter((c) => c.studentId === studentId || c.studentCode === studentId);
   }
 
   public getStudentEligibility(studentId: string): FinalExamEligibility {
@@ -176,6 +178,34 @@ class AppDataStore {
   }
 
   // --- MUTATIONS ---
+  public registerNewStudent(student: Student): Student {
+    const existingIndex = this.students.findIndex(
+      (s) => s.id === student.id || s.studentCode === student.studentCode
+    );
+
+    if (existingIndex >= 0) {
+      this.students[existingIndex] = student;
+    } else {
+      this.students = [student, ...this.students];
+    }
+
+    this.saveToLocalStorage();
+    return student;
+  }
+
+  public updateStudentProfile(studentId: string, updates: Partial<Student>): Student | undefined {
+    const targetIndex = this.students.findIndex((s) => s.id === studentId || s.studentCode === studentId);
+    if (targetIndex >= 0) {
+      this.students[targetIndex] = {
+        ...this.students[targetIndex],
+        ...updates,
+      };
+      this.saveToLocalStorage();
+      return this.students[targetIndex];
+    }
+    return undefined;
+  }
+
   public createQEBooking(booking: Omit<QEBooking, "id">): QEBooking {
     const newBooking: QEBooking = {
       ...booking,
@@ -189,6 +219,15 @@ class AppDataStore {
         ? { ...t, activeBookingsCount: t.activeBookingsCount + 1 }
         : t
     );
+
+    // Sync to Firestore if available
+    try {
+      if (db) {
+        setDoc(doc(db, "qe_bookings", newBooking.id), newBooking, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Firestore qe_bookings sync error:", e);
+    }
 
     this.saveToLocalStorage();
     return newBooking;
@@ -239,6 +278,19 @@ class AppDataStore {
       );
     }
 
+    // Sync to Firestore if available
+    try {
+      if (db) {
+        setDoc(doc(db, "qe_results", newResult.id), newResult, { merge: true });
+        setDoc(doc(db, "qe_bookings", booking.id), { status: "evaluated" }, { merge: true });
+        if (evaluation.finalResult === "passed") {
+          setDoc(doc(db, "students", booking.studentId), { passedQE: true }, { merge: true });
+        }
+      }
+    } catch (e) {
+      console.warn("Firestore evaluation sync error:", e);
+    }
+
     this.saveToLocalStorage();
     return newResult;
   }
@@ -249,6 +301,15 @@ class AppDataStore {
       id: `LOG-${Date.now().toString().slice(-4)}`,
     };
     this.advisorLogs = [newLog, ...this.advisorLogs];
+
+    try {
+      if (db) {
+        setDoc(doc(db, "advisor_meeting_logs", newLog.id), newLog, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Firestore add log sync error:", e);
+    }
+
     this.saveToLocalStorage();
     return newLog;
   }
@@ -264,6 +325,19 @@ class AppDataStore {
           }
         : log
     );
+
+    try {
+      if (db) {
+        setDoc(doc(db, "advisor_meeting_logs", logId), {
+          status,
+          advisorFeedback: feedback || "",
+          verifiedAt: new Date().toISOString(),
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Firestore update log status error:", e);
+    }
+
     this.saveToLocalStorage();
   }
 
@@ -273,6 +347,15 @@ class AppDataStore {
       id: `CONF-${Date.now().toString().slice(-4)}`,
     };
     this.conferenceEvidence = [newEvidence, ...this.conferenceEvidence];
+
+    try {
+      if (db) {
+        setDoc(doc(db, "conference_evidence", newEvidence.id), newEvidence, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Firestore conference evidence error:", e);
+    }
+
     this.saveToLocalStorage();
     return newEvidence;
   }
@@ -288,6 +371,19 @@ class AppDataStore {
           }
         : ev
     );
+
+    try {
+      if (db) {
+        setDoc(doc(db, "conference_evidence", evidenceId), {
+          status,
+          rejectionReason: rejectionReason || "",
+          verifiedAt: status === 'verified' ? new Date().toISOString() : null,
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.warn("Firestore conference update error:", e);
+    }
+
     this.saveToLocalStorage();
   }
 }
