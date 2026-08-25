@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { getStorage, FirebaseStorage } from "firebase/storage";
+import { getAnalytics, isSupported, Analytics } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCTzpSgjEdEze3I1Vmcbs7YSv22Z0OGLZM",
@@ -19,14 +20,23 @@ let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 let storage: FirebaseStorage;
+let analytics: Analytics | undefined;
 
 try {
   app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
+
+  if (typeof window !== "undefined") {
+    isSupported().then((supported: boolean) => {
+      if (supported) {
+        analytics = getAnalytics(app);
+      }
+    });
+  }
 } catch (error) {
   console.warn("Firebase initialization warning (running in safe mode):", error);
 }
 
-export { app, auth, db, storage, firebaseConfig };
+export { app, auth, db, storage, analytics, firebaseConfig };

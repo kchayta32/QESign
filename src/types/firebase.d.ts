@@ -19,3 +19,9 @@ declare module 'firebase/storage' {
   export function getStorage(app?: any): any;
   export type FirebaseStorage = any;
 }
+
+declare module 'firebase/analytics' {
+  export function getAnalytics(app?: any): any;
+  export function isSupported(): Promise<boolean>;
+  export type Analytics = any;
+}
