@@ -1,0 +1,379 @@
+"use client";
+
+import React, { useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { dbStore } from "@/lib/firebase/db";
+import { formatThaiDate } from "@/lib/utils";
+import TeacherEvaluationSheet from "./TeacherEvaluationSheet";
+import AdvisorLogsManager from "./AdvisorLogsManager";
+import ConferenceEvidenceManager from "./ConferenceEvidenceManager";
+import {
+  Users,
+  Award,
+  BookOpen,
+  FileCheck2,
+  Calendar,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Calculator,
+  ChevronRight,
+  Sparkles,
+  Search,
+  Check,
+  AlertTriangle
+} from "lucide-react";
+import { QEBooking, Student, QEResult } from "@/types";
+
+export default function TeacherDashboard() {
+  const { currentTeacher, allStudents, selectStudentById } = useAuth();
+
+  const [selectedBookingForEval, setSelectedBookingForEval] = useState<QEBooking | null>(null);
+  const [selectedStudentForLogs, setSelectedStudentForLogs] = useState<Student | null>(null);
+  const [selectedStudentForConf, setSelectedStudentForConf] = useState<Student | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const qeBookings = dbStore.getQEBookings();
+  const pendingBookings = qeBookings.filter(
+    (b) => b.examinerIds.includes(currentTeacher.id) || currentTeacher.isCommittee
+  );
+
+  const advisees = allStudents.filter(
+    (s) => s.advisorId === currentTeacher.id || s.coAdvisorId === currentTeacher.id
+  );
+
+  const filteredAdvisees = advisees.filter(
+    (s) =>
+      s.firstNameTh.includes(searchQuery) ||
+      s.lastNameTh.includes(searchQuery) ||
+      s.studentCode.includes(searchQuery)
+  );
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto pb-16">
+      {/* Teacher Top Info Card */}
+      <div className="bg-white rounded-3xl p-6 md:p-8 shadow-soft border border-neutral-200/80">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center space-x-4">
+            <img
+              src={currentTeacher.avatarUrl || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"}
+              alt={currentTeacher.firstNameTh}
+              className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-cover border-2 border-ssru-crimson/20 shadow-md flex-shrink-0"
+            />
+            <div>
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-50 text-ssru-crimson border border-ssru-crimson/20">
+                  {currentTeacher.teacherCode}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-700">
+                  กรรมการสอบวัดคุณสมบัติ &amp; อาจารย์ที่ปรึกษา
+                </span>
+              </div>
+              <h2 className="text-lg md:text-2xl font-bold font-display text-neutral-charcoal leading-tight">
+                {currentTeacher.prefixTh}{currentTeacher.firstNameTh} {currentTeacher.lastNameTh}
+              </h2>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                อีเมล: <span className="font-semibold text-neutral-700">{currentTeacher.email}</span> • เชี่ยวชาญแทร็ก: {currentTeacher.specializations.join(", ")}
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Metrics */}
+          <div className="flex items-center gap-3">
+            <div className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200 text-center min-w-[100px]">
+              <span className="text-neutral-400 text-xs block">นักศึกษาที่ปรึกษา</span>
+              <span className="text-lg font-bold text-neutral-charcoal font-display">
+                {advisees.length} คน
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-ssru-50/50 border border-ssru-crimson/20 text-center min-w-[100px]">
+              <span className="text-ssru-crimson text-xs block font-semibold">รอบสอบที่ต้องประเมิน</span>
+              <span className="text-lg font-bold text-ssru-crimson font-display">
+                {pendingBookings.length} รายการ
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 1: Pending QE Examinations & 3-Examiner Evaluation Sheet */}
+      <div className="bg-white rounded-3xl p-6 shadow-soft border border-neutral-200">
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-neutral-100">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-ssru-50 text-ssru-crimson">
+              <Calculator className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold font-display text-neutral-charcoal">
+                รายการสอบวัดคุณสมบัติที่ต้องประเมิน (QE Evaluation Queue)
+              </h3>
+              <p className="text-xs text-neutral-500">
+                ประเมินผลคะแนนรายบุคคล 3 กรรมการด้วยเกณฑ์มติ 2 ใน 3 เสียง
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {pendingBookings.map((booking) => {
+            const result = dbStore.getQEResultByBooking(booking.id);
+            const isEvaluated = booking.status === "evaluated" && !!result;
+
+            return (
+              <div
+                key={booking.id}
+                className="p-5 rounded-2xl border border-neutral-200 bg-white hover:border-ssru-crimson/40 transition-all shadow-sm space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-ssru-50 text-ssru-crimson">
+                        Track: {booking.trackId}
+                      </span>
+                      <span className="text-xs text-neutral-400 font-mono">
+                        {booking.studentCode}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-neutral-charcoal">
+                      {booking.studentNameTh}
+                    </h4>
+                  </div>
+
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                    isEvaluated ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+                  }`}>
+                    {isEvaluated ? "ประเมินผลแล้ว" : "รอประเมิน"}
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-neutral-50 text-xs space-y-1">
+                  <div className="flex items-center justify-between text-neutral-600">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-neutral-400" />
+                      {formatThaiDate(booking.examDate)} ({booking.timeSlot} น.)
+                    </span>
+                    <span className="font-semibold text-neutral-700">{booking.room}</span>
+                  </div>
+                </div>
+
+                {isEvaluated && result && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 text-xs flex items-center justify-between">
+                    <span className="font-bold text-emerald-900">
+                      มติ {result.passVotesCount}/3 เสียง ({result.finalResult === "passed" ? "ผ่าน" : "ไม่ผ่าน"})
+                    </span>
+                    <span className="text-emerald-700 font-medium">
+                      เฉลี่ย {result.averageScore}%
+                    </span>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setSelectedBookingForEval(booking)}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold bg-neutral-900 hover:bg-neutral-800 text-white flex items-center justify-center space-x-2 transition-colors shadow-sm"
+                >
+                  <Calculator className="w-4 h-4 text-amber-400" />
+                  <span>{isEvaluated ? "ดู/แก้ไขแบบประเมิน 3 กรรมการ" : "เปิดแบบประเมินผลสอบ (3 กรรมการ)"}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Section 2: Advisees Progress & 3-Condition Gate Tracking Table */}
+      <div className="bg-white rounded-3xl p-6 shadow-soft border border-neutral-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-neutral-100">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-ssru-50 text-ssru-crimson">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold font-display text-neutral-charcoal">
+                นักศึกษาในความดูแล (Advisees 3-Condition Pipeline)
+              </h3>
+              <p className="text-xs text-neutral-500">
+                ติดตามสถานะ บันทึกพบที่ปรึกษา, ผลสอบ QE และเอกสารตีพิมพ์
+              </p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="ค้นหาชื่อ หรือรหัสนักศึกษา..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="text-xs pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20"
+            />
+          </div>
+        </div>
+
+        {/* Advisees Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider border-b border-neutral-200">
+                <th className="py-3 px-4 font-bold">นักศึกษา</th>
+                <th className="py-3 px-3 font-bold">Track</th>
+                <th className="py-3 px-3 font-bold">1. บันทึกที่ปรึกษา</th>
+                <th className="py-3 px-3 font-bold">2. ผลสอบ QE</th>
+                <th className="py-3 px-3 font-bold">3. เอกสาร Conference</th>
+                <th className="py-3 px-3 font-bold">Final Gate</th>
+                <th className="py-3 px-4 font-bold text-right">การจัดการ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {filteredAdvisees.map((student) => {
+                const eligibility = dbStore.getStudentEligibility(student.id);
+                const confList = dbStore.getConferenceEvidence(student.id);
+                const hasPendingConf = confList.some((c) => c.status === "pending");
+
+                return (
+                  <tr key={student.id} className="hover:bg-neutral-50/80 transition-colors">
+                    {/* Student Info */}
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={student.avatarUrl}
+                          alt={student.firstNameTh}
+                          className="w-8 h-8 rounded-full object-cover"
+                        />
+                        <div>
+                          <p className="font-bold text-neutral-charcoal">
+                            {student.prefixTh} {student.firstNameTh} {student.lastNameTh}
+                          </p>
+                          <span className="text-[11px] text-neutral-400 font-mono">
+                            {student.studentCode}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Track */}
+                    <td className="py-3.5 px-3 font-semibold text-ssru-crimson">
+                      {student.trackId}
+                    </td>
+
+                    {/* Condition 1: Advisor Logs */}
+                    <td className="py-3.5 px-3">
+                      <button
+                        onClick={() => setSelectedStudentForLogs(student)}
+                        className="hover:underline flex items-center space-x-1 font-semibold"
+                      >
+                        <span className={eligibility.condition1_LogsApproved ? "text-emerald-700" : "text-amber-700"}>
+                          {eligibility.advisorLogsCount}/6 ครั้ง
+                        </span>
+                        {eligibility.condition1_LogsApproved && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 ml-1" />
+                        )}
+                      </button>
+                    </td>
+
+                    {/* Condition 2: QE Result */}
+                    <td className="py-3.5 px-3">
+                      {eligibility.condition2_QEPassed ? (
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 flex items-center w-fit gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> ผ่าน ({eligibility.qePassVotes}/3)
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-neutral-100 text-neutral-600">
+                          {eligibility.qeStatus === "pending" ? "รอประเมิน" : "ยังไม่ผ่าน"}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Condition 3: Conference Proof */}
+                    <td className="py-3.5 px-3">
+                      <button
+                        onClick={() => setSelectedStudentForConf(student)}
+                        className="hover:underline"
+                      >
+                        {eligibility.condition3_ConferenceApproved ? (
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 text-emerald-800 flex items-center w-fit gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> รับรองแล้ว
+                          </span>
+                        ) : hasPendingConf ? (
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 flex items-center w-fit gap-1 animate-pulse">
+                            <Clock className="w-3 h-3" /> รอตรวจเอกสาร
+                          </span>
+                        ) : (
+                          <span className="text-neutral-400">ยังไม่ส่ง</span>
+                        )}
+                      </button>
+                    </td>
+
+                    {/* Final Gate Status */}
+                    <td className="py-3.5 px-3">
+                      {eligibility.isFinalEligible ? (
+                        <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500 text-white shadow-sm flex items-center w-fit gap-1">
+                          <Sparkles className="w-3 h-3" /> ปลดล็อกแล้ว
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-neutral-100 text-neutral-500">
+                          ขาดเงื่อนไข
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Action Buttons */}
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end space-x-1.5">
+                        <button
+                          onClick={() => setSelectedStudentForLogs(student)}
+                          title="ตรวจบันทึกการเข้าพบ"
+                          className="p-1.5 text-neutral-600 hover:text-ssru-crimson hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <BookOpen className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setSelectedStudentForConf(student)}
+                          title="ตรวจเอกสาร Conference"
+                          className="p-1.5 text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        >
+                          <FileCheck2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {selectedBookingForEval && (
+        <TeacherEvaluationSheet
+          booking={selectedBookingForEval}
+          currentTeacher={currentTeacher}
+          existingResult={dbStore.getQEResultByBooking(selectedBookingForEval.id)}
+          isOpen={!!selectedBookingForEval}
+          onClose={() => setSelectedBookingForEval(null)}
+          onSaved={() => setSelectedBookingForEval(null)}
+        />
+      )}
+
+      {selectedStudentForLogs && (
+        <AdvisorLogsManager
+          student={selectedStudentForLogs}
+          currentTeacher={currentTeacher}
+          role="teacher"
+          isOpen={!!selectedStudentForLogs}
+          onClose={() => setSelectedStudentForLogs(null)}
+        />
+      )}
+
+      {selectedStudentForConf && (
+        <ConferenceEvidenceManager
+          student={selectedStudentForConf}
+          currentTeacher={currentTeacher}
+          role="teacher"
+          isOpen={!!selectedStudentForConf}
+          onClose={() => setSelectedStudentForConf(null)}
+        />
+      )}
+    </div>
+  );
+}

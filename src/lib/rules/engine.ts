@@ -1,0 +1,160 @@
+// Business Logic & Rules Engine for SSRU CE System
+import {
+  Student,
+  ExaminerScoreItem,
+  QEResult,
+  AdvisorMeetingLog,
+  ConferenceEvidence,
+  FinalExamEligibility,
+  TrackType
+} from "@/types";
+
+export const QE_PASSING_SCORE_DEFAULT = 60;
+export const ADVISOR_MIN_REQUIRED_LOGS = 6;
+export const COMMITTEE_REQUIRED_VOTES = 2; // 2 out of 3 examiners
+
+/**
+ * 1. Check QE Booking Prerequisites
+ * Example: Software Engineering & others require passed proposal (3 chapters)
+ */
+export function checkQEBookingPrerequisite(student: Student, trackId: TrackType): {
+  canBook: boolean;
+  reasonTh: string;
+} {
+  if (student.status !== "active") {
+    return {
+      canBook: false,
+      reasonTh: "สถานะนักศึกษาไม่พร้อมสำหรับการสอบ (ต้องอยู่ในสถานะปกติ)",
+    };
+  }
+
+  // Rule: Must have passed 3-chapter proposal exam before booking QE
+  if (!student.passed3Chapter) {
+    return {
+      canBook: false,
+      reasonTh: "ยังไม่ผ่านการสอบหัวข้อและเค้าโครงโครงงาน 3 บท (Prerequisite Required)",
+    };
+  }
+
+  return {
+    canBook: true,
+    reasonTh: "มีคุณสมบัติครบถ้วน พร้อมลงทะเบียนจองสอบวัดคุณสมบัติ (QE)",
+  };
+}
+
+/**
+ * 2. Committee Voting Rule Engine
+ * Evaluates 3-examiner matrix: Passed if pass votes >= 2 out of 3 examiners
+ */
+export function evaluateQEResult(
+  examinerScores: ExaminerScoreItem[]
+): {
+  totalExaminers: 3;
+  passVotesCount: number;
+  failVotesCount: number;
+  averageScore: number;
+  finalResult: 'passed' | 'failed' | 'pending';
+  isUnanimous: boolean;
+  summaryTh: string;
+} {
+  const totalExaminers = 3;
+  if (!examinerScores || examinerScores.length < totalExaminers) {
+    return {
+      totalExaminers: 3,
+      passVotesCount: 0,
+      failVotesCount: 0,
+      averageScore: 0,
+      finalResult: 'pending',
+      isUnanimous: false,
+      summaryTh: 'รอผลการประเมินจากคณะกรรมการครบ 3 ท่าน',
+    };
+  }
+
+  // Count pass votes based on isPass flag (or score >= 60)
+  const passVotesCount = examinerScores.filter(
+    (item) => item.isPass === true || item.score >= QE_PASSING_SCORE_DEFAULT
+  ).length;
+
+  const failVotesCount = totalExaminers - passVotesCount;
+  const totalScore = examinerScores.reduce((sum, item) => sum + (item.score || 0), 0);
+  const averageScore = Number((totalScore / totalExaminers).toFixed(2));
+
+  const isPassed = passVotesCount >= COMMITTEE_REQUIRED_VOTES;
+  const isUnanimous = passVotesCount === 3;
+
+  let summaryTh = "";
+  if (isPassed) {
+    summaryTh = isUnanimous
+      ? `ผ่านเกณฑ์ประเมินด้วยมติเอกฉันท์ (3 ใน 3 เสียง) คะแนนเฉลี่ย ${averageScore}%`
+      : `ผ่านเกณฑ์ประเมินด้วยมติเสียงข้างมาก (2 ใน 3 เสียง) คะแนนเฉลี่ย ${averageScore}%`;
+  } else {
+    summaryTh = `ไม่ผ่านเกณฑ์การประเมิน (ได้ ${passVotesCount} จาก 3 เสียง - ต้องได้ 2 ใน 3 เสียงขึ้นไป)`;
+  }
+
+  return {
+    totalExaminers: 3,
+    passVotesCount,
+    failVotesCount,
+    averageScore,
+    finalResult: isPassed ? 'passed' : 'failed',
+    isUnanimous,
+    summaryTh,
+  };
+}
+
+/**
+ * 3. 3-Condition Eligibility Gate Engine
+ * Condition 1: Advisor Meeting Logs (>= 6 approved logs)
+ * Condition 2: Passed QE (2/3 Committee Votes)
+ * Condition 3: Verified Conference Evidence (Paper presentation proof)
+ * 
+ * Logic: Gate Unlock = Condition 1 && Condition 2 && Condition 3
+ */
+export function calculateFinalExamEligibility(
+  student: Student,
+  meetingLogs: AdvisorMeetingLog[],
+  qeResult?: QEResult | null,
+  conferenceEvidence?: ConferenceEvidence | null
+): FinalExamEligibility {
+  // Condition 1: Advisor Logs
+  const approvedLogs = (meetingLogs || []).filter((log) => log.status === 'approved');
+  const advisorLogsCount = approvedLogs.length;
+  const condition1_LogsApproved = advisorLogsCount >= ADVISOR_MIN_REQUIRED_LOGS;
+
+  // Condition 2: QE Result
+  const qeStatus = qeResult ? qeResult.finalResult : student.passedQE ? 'passed' : 'not_taken';
+  const qePassVotes = qeResult ? qeResult.passVotesCount : student.passedQE ? 3 : 0;
+  const condition2_QEPassed = qeStatus === 'passed';
+
+  // Condition 3: Conference Evidence
+  const conferenceStatus = conferenceEvidence
+    ? conferenceEvidence.status
+    : 'not_submitted';
+  const condition3_ConferenceApproved = conferenceStatus === 'verified';
+
+  // Final Gate Evaluation (Strict AND logic across all 3 criteria)
+  const isFinalEligible =
+    condition1_LogsApproved && condition2_QEPassed && condition3_ConferenceApproved;
+
+  const certificateCode = isFinalEligible
+    ? `SSRU-CE-${student.studentCode.slice(-4)}-${new Date().getFullYear()}`
+    : undefined;
+
+  return {
+    studentId: student.id,
+    studentCode: student.studentCode,
+    studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`,
+    advisorLogsCount,
+    advisorLogsRequired: ADVISOR_MIN_REQUIRED_LOGS,
+    condition1_LogsApproved,
+    qeStatus,
+    qePassVotes,
+    condition2_QEPassed,
+    conferenceEvidenceId: conferenceEvidence?.id,
+    conferenceStatus,
+    condition3_ConferenceApproved,
+    isFinalEligible,
+    unlockedAt: isFinalEligible ? new Date().toISOString() : undefined,
+    certificateCode,
+  };
+}

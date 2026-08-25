@@ -1,0 +1,208 @@
+// TypeScript Data Models for SSRU CE QE & Project Booking System
+
+export type UserRole = 'student' | 'teacher' | 'admin';
+
+export type TrackType = 'HW' | 'SW' | 'NW' | 'DB';
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  photoURL?: string;
+  phone?: string;
+  studentId?: string; // Student code e.g. 64123456001
+  teacherCode?: string; // Teacher code e.g. T-101
+  department: string;
+  createdAt: string;
+}
+
+export interface Student {
+  id: string;
+  uid: string;
+  studentCode: string;
+  prefixTh: string;
+  firstNameTh: string;
+  lastNameTh: string;
+  prefixEn: string;
+  firstNameEn: string;
+  lastNameEn: string;
+  email: string;
+  phone: string;
+  trackId: TrackType;
+  yearLevel: number; // 1-4
+  status: 'active' | 'graduated' | 'suspended';
+  advisorId: string;
+  coAdvisorId?: string;
+  projectTitleTh?: string;
+  projectTitleEn?: string;
+  passed3Chapter: boolean; // Proposal Exam 3-Chapter Passed (QE Prerequisite)
+  passedQE: boolean;
+  finalEligible: boolean;
+  avatarUrl?: string;
+}
+
+export interface Teacher {
+  id: string;
+  uid: string;
+  teacherCode: string;
+  prefixTh: string;
+  firstNameTh: string;
+  lastNameTh: string;
+  academicRankTh: string; // เช่น ผศ.ดร., อ.ดร., ผศ.
+  email: string;
+  phone: string;
+  specializations: TrackType[];
+  isCommittee: boolean;
+  avatarUrl?: string;
+  currentAdviseesCount?: number;
+}
+
+export interface Track {
+  id: TrackType;
+  code: TrackType;
+  nameTh: string;
+  nameEn: string;
+  descriptionTh: string;
+  iconName: string;
+  color: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  quotaTotal: number;
+  activeBookingsCount: number;
+  examinersDefault: string[]; // Teacher IDs
+}
+
+export type BookingStatus = 'pending' | 'confirmed' | 'evaluating' | 'evaluated' | 'cancelled';
+
+export interface QEBooking {
+  id: string;
+  studentId: string;
+  studentUid: string;
+  studentCode: string;
+  studentNameTh: string;
+  trackId: TrackType;
+  roundId: string;
+  roundName: string;
+  examDate: string; // YYYY-MM-DD
+  timeSlot: string; // e.g. "09:00 - 10:30"
+  room: string; // e.g. "CE Lab 4731"
+  status: BookingStatus;
+  examinerIds: [string, string, string]; // Exactly 3 examiners
+  examinerNames: [string, string, string];
+  prerequisitePassed: boolean;
+  submissionDate: string;
+  notes?: string;
+}
+
+export interface ExaminerScoreItem {
+  examinerId: string;
+  examinerName: string;
+  score: number; // 0 - 100
+  isPass: boolean; // >= 60 or explicitly passed
+  comments: string;
+  evaluatedAt: string;
+  signatureStatus: boolean;
+}
+
+export interface QEResult {
+  id: string;
+  bookingId: string;
+  studentId: string;
+  studentCode: string;
+  studentNameTh: string;
+  trackId: TrackType;
+  evaluationRound: string;
+  examinerScores: ExaminerScoreItem[];
+  totalExaminers: 3;
+  passVotesCount: number; // Count of isPass === true
+  finalResult: 'passed' | 'failed' | 'pending'; // 2/3 Rule: passVotesCount >= 2
+  averageScore: number;
+  certifiedDate?: string;
+  announced: boolean;
+}
+
+export interface AdvisorMeetingLog {
+  id: string;
+  studentId: string;
+  studentUid: string;
+  studentCode: string;
+  studentNameTh: string;
+  projectTitle: string;
+  meetingDate: string; // YYYY-MM-DD
+  meetingType: 'onsite' | 'online';
+  topic: string;
+  discussionSummary: string;
+  progressPercentage: number; // 0 - 100
+  nextGoals: string;
+  advisorId: string;
+  advisorNameTh: string;
+  status: 'pending' | 'approved' | 'rejected';
+  advisorFeedback?: string;
+  verifiedAt?: string;
+}
+
+export interface ConferenceEvidence {
+  id: string;
+  studentId: string;
+  studentUid: string;
+  studentCode: string;
+  studentNameTh: string;
+  projectTitle: string;
+  paperTitle: string;
+  conferenceName: string;
+  presentationDate: string;
+  conferenceLevel: 'national' | 'international';
+  indexedBy: 'TCI-1' | 'TCI-2' | 'Scopus' | 'IEEE Xplore' | 'Other';
+  proofType: 'certificate' | 'proceeding' | 'acceptance_letter';
+  proofFileUrl: string;
+  fileName: string;
+  fileSize?: string;
+  status: 'pending' | 'verified' | 'rejected';
+  rejectionReason?: string;
+  reviewedByAdvisorId?: string;
+  reviewedByAdvisorName?: string;
+  verifiedAt?: string;
+  submissionDate: string;
+}
+
+export interface FinalExamEligibility {
+  studentId: string;
+  studentCode: string;
+  studentNameTh: string;
+  // Condition 1: Advisor Meeting Logs
+  advisorLogsCount: number;
+  advisorLogsRequired: number; // e.g. minimum 6 logs
+  condition1_LogsApproved: boolean;
+
+  // Condition 2: QE Result Pass (>= 2 of 3)
+  qeStatus: 'passed' | 'failed' | 'not_taken' | 'pending';
+  qePassVotes: number;
+  condition2_QEPassed: boolean;
+
+  // Condition 3: Conference Evidence Verified
+  conferenceEvidenceId?: string;
+  conferenceStatus: 'verified' | 'pending' | 'rejected' | 'not_submitted';
+  condition3_ConferenceApproved: boolean;
+
+  // Final Result Gate: Condition1 && Condition2 && Condition3
+  isFinalEligible: boolean;
+  unlockedAt?: string;
+  certificateCode?: string;
+}
+
+export interface ExamRound {
+  id: string;
+  roundNumber: number;
+  academicYear: string; // e.g. "2567"
+  semester: number; // 1 or 2
+  titleTh: string;
+  type: 'QE' | 'PROJECT_PROPOSAL' | 'FINAL_DEFENSE';
+  startDate: string;
+  endDate: string;
+  bookingDeadline: string;
+  isActive: boolean;
+  availableRooms: string[];
+  slotsPerDay: string[];
+}

@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isTeacher() {
+      return isSignedIn() && (getUserData().role == 'teacher' || getUserData().role == 'admin');
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && getUserData().role == 'admin';
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // Students Collection
+    match /students/{studentId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (request.auth.uid == resource.data.uid || isTeacher());
+      allow delete: if isAdmin();
+    }
+
+    // Teachers Collection
+    match /teachers/{teacherId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Tracks Collection (Hardware, Software, Network, Database)
+    match /tracks/{trackId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // QE Bookings
+    match /qe_bookings/{bookingId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (request.auth.uid == resource.data.studentUid || isTeacher());
+      allow delete: if isSignedIn() && (request.auth.uid == resource.data.studentUid || isAdmin());
+    }
+
+    // QE Results & 3-Examiner Evaluation
+    match /qe_results/{resultId} {
+      allow read: if isSignedIn();
+      allow create, update: if isTeacher();
+      allow delete: if isAdmin();
+    }
+
+    // Project Bookings
+    match /project_bookings/{projectId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    // Advisor Meeting Logs (บันทึกการพบอาจารย์ที่ปรึกษา)
+    match /advisor_meeting_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isTeacher() || (isSignedIn() && request.auth.uid == resource.data.studentUid);
+      allow delete: if isTeacher() || isAdmin();
+    }
+
+    // Conference Evidence (หลักฐานการประชุมวิชาการ/ตีพิมพ์)
+    match /conference_evidence/{evidenceId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isTeacher() || (isSignedIn() && request.auth.uid == resource.data.studentUid);
+      allow delete: if isTeacher() || isAdmin();
+    }
+
+    // Final Exam Eligibility
+    match /final_exam_eligibility/{eligibilityId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+  }
+}
