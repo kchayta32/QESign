@@ -38,35 +38,28 @@ export default function TeacherEvaluationSheet({
 }: TeacherEvaluationSheetProps) {
   const teachers = dbStore.getTeachers();
 
-  const [scores, setScores] = useState<ExaminerScoreItem[]>([
-    {
-      examinerId: booking.examinerIds[0] || teachers[0]?.id || "T-101",
-      examinerName: booking.examinerNames[0] || "ผศ.สมเกียรติ พงษ์ศิริ (ประธานกรรมการ)",
-      score: 80,
-      isPass: true,
-      comments: "ความรู้พื้นฐานและสถาปัตยกรรมระบบอยู่ในเกณฑ์ดี",
-      evaluatedAt: new Date().toISOString(),
-      signatureStatus: true,
-    },
-    {
-      examinerId: booking.examinerIds[1] || teachers[1]?.id || "T-102",
-      examinerName: booking.examinerNames[1] || "ผศ.ดร.สุรชัย เอกอนันต์ (กรรมการ)",
-      score: 75,
-      isPass: true,
-      comments: "การประยุกต์ใช้งานและตอบคำถามเชิงลึกถูกต้อง",
-      evaluatedAt: new Date().toISOString(),
-      signatureStatus: true,
-    },
-    {
-      examinerId: booking.examinerIds[2] || teachers[2]?.id || "T-103",
-      examinerName: booking.examinerNames[2] || "ผศ.ดร.นพวรรณ สถิตสถาพร (กรรมการ)",
-      score: 70,
-      isPass: true,
-      comments: "ควรเพิ่มเติมเรื่องการทดสอบความปลอดภัยและการปรับปรุงประสิทธิภาพ",
-      evaluatedAt: new Date().toISOString(),
-      signatureStatus: true,
-    },
-  ]);
+  // Blank sheet: every examiner starts at 0 / FAIL so nobody can "publish" a pass by accident.
+  const buildBlankScores = (): ExaminerScoreItem[] =>
+    [0, 1, 2].map((i) => {
+      const id = booking.examinerIds[i] || teachers[i]?.id || "";
+      const t = teachers.find((x) => x.id === id);
+      const roleLabel = i === 0 ? "ประธานกรรมการ" : "กรรมการ";
+      return {
+        examinerId: id,
+        examinerName: booking.examinerNames[i] || (t ? `${t.prefixTh}${t.firstNameTh} ${t.lastNameTh} (${roleLabel})` : `กรรมการท่านที่ ${i + 1}`),
+        score: 0,
+        isPass: false,
+        comments: "",
+        evaluatedAt: new Date().toISOString(),
+        signatureStatus: false,
+      };
+    });
+
+  const [scores, setScores] = useState<ExaminerScoreItem[]>(
+    existingResult && existingResult.examinerScores?.length === 3 ? existingResult.examinerScores : buildBlankScores()
+  );
+  const [confirmed, setConfirmed] = useState<boolean>(false);
+  const [saveError, setSaveError] = useState<string>("");
 
   useEffect(() => {
     if (existingResult && existingResult.examinerScores?.length === 3) {
@@ -115,7 +108,13 @@ export default function TeacherEvaluationSheet({
   };
 
   const handleSaveEvaluation = () => {
-    const savedResult = dbStore.updateExaminerEvaluation(booking.id, scores);
+    setSaveError("");
+    if (!confirmed) {
+      setSaveError("กรุณาติ๊กยืนยันว่าคะแนนและมติของกรรมการทั้ง 3 ท่านถูกต้องก่อนประกาศผล");
+      return;
+    }
+    const stamped = scores.map((s) => ({ ...s, evaluatedAt: new Date().toISOString(), signatureStatus: true }));
+    const savedResult = dbStore.updateExaminerEvaluation(booking.id, stamped);
     onSaved(savedResult);
     onClose();
   };
@@ -342,6 +341,19 @@ export default function TeacherEvaluationSheet({
           </div>
 
           {/* Footer Actions */}
+          {saveError && (
+            <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
+          <label className="flex items-start gap-2 text-xs text-neutral-700 p-3 rounded-2xl bg-neutral-50 border border-neutral-200 cursor-pointer">
+            <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5 accent-ssru-crimson" />
+            <span>
+              ข้าพเจ้า ({currentTeacher.prefixTh}{currentTeacher.firstNameTh} {currentTeacher.lastNameTh}) ยืนยันว่าคะแนนและมติของคณะกรรมการทั้ง 3 ท่านข้างต้นถูกต้องครบถ้วน
+              และประสงค์จะประกาศผลการสอบให้นักศึกษาทราบ
+            </span>
+          </label>
           <div className="flex items-center justify-between pt-4 border-t border-neutral-100">
             <p className="text-xs text-neutral-400 flex items-center gap-1.5">
               <Info className="w-4 h-4" />

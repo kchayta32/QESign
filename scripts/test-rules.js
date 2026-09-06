@@ -1,9 +1,17 @@
-// Standalone Verification Script for SSRU CE System Business Rules Engine
+// Verification Script for the SSRU CE Business Rules Engine.
+// Runs against the real TypeScript source: node -r ./scripts/register-ts.js scripts/test-rules.js
 const {
   evaluateQEResult,
   checkQEBookingPrerequisite,
   calculateFinalExamEligibility,
-} = require("../src/lib/rules/engine.js");
+} = require("../src/lib/rules/engine.ts");
+
+let failures = 0;
+const origLog = console.log;
+console.log = (...args) => {
+  if (typeof args[0] === "string" && args[0].startsWith("[FAIL]")) failures++;
+  origLog(...args);
+};
 
 console.log("=== [START] SSRU CE Business Rules Verification ===");
 
@@ -106,4 +114,19 @@ console.log(`[${resC.isFinalEligible === false ? "PASS" : "FAIL"}] QE Failed (1/
 const resD = calculateFinalExamEligibility(mockStudent, fullLogs, passedQE, pendingConf);
 console.log(`[${resD.isFinalEligible === false ? "PASS" : "FAIL"}] Conference Proof Pending -> isFinalEligible = ${resD.isFinalEligible}`);
 
-console.log("\n=== [COMPLETE] All Business Logic Rules Verified Successfully ===");
+// 3. QE booking prerequisite
+console.log("\n--- Test 3: QE Booking Prerequisite ---");
+const preOk = checkQEBookingPrerequisite({ ...mockStudent, passed3Chapter: true, status: "active" }, "SW");
+console.log(`[${preOk.canBook ? "PASS" : "FAIL"}] Active + passed 3 chapters -> canBook = ${preOk.canBook}`);
+const preNo3 = checkQEBookingPrerequisite({ ...mockStudent, passed3Chapter: false, status: "active" }, "SW");
+console.log(`[${!preNo3.canBook ? "PASS" : "FAIL"}] 3-chapter exam not passed -> canBook = ${preNo3.canBook}`);
+const preSuspended = checkQEBookingPrerequisite({ ...mockStudent, passed3Chapter: true, status: "suspended" }, "SW");
+console.log(`[${!preSuspended.canBook ? "PASS" : "FAIL"}] Suspended student -> canBook = ${preSuspended.canBook}`);
+
+// 4. Incomplete committee -> pending
+console.log("\n--- Test 4: Incomplete committee ---");
+const pending = evaluateQEResult([{ examinerId: "T-1", examinerName: "P1", score: 90, isPass: true }]);
+console.log(`[${pending.finalResult === "pending" ? "PASS" : "FAIL"}] Only 1 of 3 scores -> ${pending.finalResult}`);
+
+console.log(failures === 0 ? "\n=== [COMPLETE] All Business Logic Rules Verified Successfully ===" : `\n=== [FAILED] ${failures} check(s) failed ===`);
+process.exit(failures === 0 ? 0 : 1);

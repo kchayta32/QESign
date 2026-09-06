@@ -23,31 +23,60 @@ import {
   Check,
   AlertTriangle
 } from "lucide-react";
-import { QEBooking, Student, QEResult } from "@/types";
+import { QEBooking, Student } from "@/types";
+import Avatar from "./Avatar";
 
 export default function TeacherDashboard() {
-  const { currentTeacher, allStudents, selectStudentById } = useAuth();
+  const { currentTeacher, allStudents } = useAuth();
 
   const [selectedBookingForEval, setSelectedBookingForEval] = useState<QEBooking | null>(null);
   const [selectedStudentForLogs, setSelectedStudentForLogs] = useState<Student | null>(null);
   const [selectedStudentForConf, setSelectedStudentForConf] = useState<Student | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [showAllBookings, setShowAllBookings] = useState(false);
 
-  const qeBookings = dbStore.getQEBookings();
-  const pendingBookings = qeBookings.filter(
-    (b) => b.examinerIds.includes(currentTeacher.id) || currentTeacher.isCommittee
-  );
+  if (!currentTeacher) {
+    return (
+      <div className="p-8 text-center text-neutral-500">
+        <p>ไม่พบข้อมูลอาจารย์ กรุณาเข้าสู่ระบบใหม่อีกครั้ง</p>
+      </div>
+    );
+  }
+
+  const qeBookings = dbStore.getQEBookings().filter((b) => b.status !== "cancelled");
+  const myBookings = qeBookings.filter((b) => b.examinerIds.includes(currentTeacher.id));
+  const visibleBookings = (showAllBookings && currentTeacher.isCommittee ? qeBookings : myBookings)
+    .slice()
+    .sort((a, b) => {
+      // Awaiting evaluation first, then by exam date
+      const aDone = a.status === "evaluated" ? 1 : 0;
+      const bDone = b.status === "evaluated" ? 1 : 0;
+      return aDone - bDone || a.examDate.localeCompare(b.examDate);
+    });
+  const awaitingCount = myBookings.filter((b) => b.status !== "evaluated").length;
 
   const advisees = allStudents.filter(
     (s) => s.advisorId === currentTeacher.id || s.coAdvisorId === currentTeacher.id
   );
 
+  const q = searchQuery.trim().toLowerCase();
   const filteredAdvisees = advisees.filter(
     (s) =>
-      s.firstNameTh.includes(searchQuery) ||
-      s.lastNameTh.includes(searchQuery) ||
-      s.studentCode.includes(searchQuery)
+      !q ||
+      s.firstNameTh.toLowerCase().includes(q) ||
+      s.lastNameTh.toLowerCase().includes(q) ||
+      s.studentCode.includes(q)
   );
+
+  const handleToggle3Chapter = (student: Student) => {
+    const next = !student.passed3Chapter;
+    const msg = next
+      ? `ยืนยันว่า ${student.prefixTh}${student.firstNameTh} ${student.lastNameTh} (${student.studentCode}) สอบผ่านหัวข้อและเค้าโครง 3 บทแล้ว?\nนักศึกษาจะสามารถจองสอบ QE ได้ทันที`
+      : `ยกเลิกสถานะผ่าน 3 บท ของ ${student.studentCode}?`;
+    if (window.confirm(msg)) {
+      dbStore.setStudentPassed3Chapter(student.id, next);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">
@@ -55,10 +84,10 @@ export default function TeacherDashboard() {
       <div className="bg-white rounded-3xl p-6 md:p-8 shadow-soft border border-neutral-200/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center space-x-4">
-            <img
-              src={currentTeacher.avatarUrl || "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"}
-              alt={currentTeacher.firstNameTh}
-              className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-cover border-2 border-ssru-crimson/20 shadow-md flex-shrink-0"
+            <Avatar
+              src={currentTeacher.avatarUrl}
+              name={`${currentTeacher.firstNameTh} ${currentTeacher.lastNameTh}`}
+              className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-cover border-2 border-ssru-crimson/20 shadow-md flex-shrink-0 bg-white"
             />
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -66,13 +95,14 @@ export default function TeacherDashboard() {
                   {currentTeacher.teacherCode}
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-700">
-                  กรรมการสอบวัดคุณสมบัติ &amp; อาจารย์ที่ปรึกษา
+                  {currentTeacher.isCommittee ? "กรรมการสอบวัดคุณสมบัติ & อาจารย์ที่ปรึกษา" : "อาจารย์ที่ปรึกษา"}
                 </span>
               </div>
               <h2 className="text-lg md:text-2xl font-bold font-display text-neutral-charcoal leading-tight">
                 {currentTeacher.prefixTh}{currentTeacher.firstNameTh} {currentTeacher.lastNameTh}
               </h2>
               <p className="text-xs text-neutral-500 mt-0.5">
+                {currentTeacher.department ? `สาขาวิชา${currentTeacher.department} • ` : ""}
                 อีเมล: <span className="font-semibold text-neutral-700">{currentTeacher.email}</span> • เชี่ยวชาญแทร็ก: {currentTeacher.specializations.join(", ")}
               </p>
             </div>
@@ -87,9 +117,9 @@ export default function TeacherDashboard() {
               </span>
             </div>
             <div className="p-3.5 rounded-2xl bg-ssru-50/50 border border-ssru-crimson/20 text-center min-w-[100px]">
-              <span className="text-ssru-crimson text-xs block font-semibold">รอบสอบที่ต้องประเมิน</span>
+              <span className="text-ssru-crimson text-xs block font-semibold">รอประเมิน (ที่ท่านเป็นกรรมการ)</span>
               <span className="text-lg font-bold text-ssru-crimson font-display">
-                {pendingBookings.length} รายการ
+                {awaitingCount} รายการ
               </span>
             </div>
           </div>
@@ -112,10 +142,22 @@ export default function TeacherDashboard() {
               </p>
             </div>
           </div>
+          {currentTeacher.isCommittee && (
+            <label className="flex items-center gap-2 text-xs text-neutral-600 cursor-pointer">
+              <input type="checkbox" checked={showAllBookings} onChange={(e) => setShowAllBookings(e.target.checked)} className="accent-ssru-crimson" />
+              <span>แสดงทุกรอบสอบของสาขา</span>
+            </label>
+          )}
         </div>
 
+        {visibleBookings.length === 0 && (
+          <div className="text-center py-10 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500">
+            ยังไม่มีรอบสอบที่ท่านได้รับมอบหมายให้ประเมิน
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pendingBookings.map((booking) => {
+          {visibleBookings.map((booking) => {
             const result = dbStore.getQEResultByBooking(booking.id);
             const isEvaluated = booking.status === "evaluated" && !!result;
 
@@ -216,6 +258,7 @@ export default function TeacherDashboard() {
               <tr className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider border-b border-neutral-200">
                 <th className="py-3 px-4 font-bold">นักศึกษา</th>
                 <th className="py-3 px-3 font-bold">Track</th>
+                <th className="py-3 px-3 font-bold">สอบ 3 บท</th>
                 <th className="py-3 px-3 font-bold">1. บันทึกที่ปรึกษา</th>
                 <th className="py-3 px-3 font-bold">2. ผลสอบ QE</th>
                 <th className="py-3 px-3 font-bold">3. เอกสาร Conference</th>
@@ -224,6 +267,15 @@ export default function TeacherDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
+              {filteredAdvisees.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-neutral-400">
+                    {advisees.length === 0
+                      ? "ยังไม่มีนักศึกษาเลือกท่านเป็นอาจารย์ที่ปรึกษา (นักศึกษาจะเลือกที่ปรึกษาเมื่อกรอกโปรไฟล์ครั้งแรก)"
+                      : "ไม่พบนักศึกษาที่ตรงกับคำค้นหา"}
+                  </td>
+                </tr>
+              )}
               {filteredAdvisees.map((student) => {
                 const eligibility = dbStore.getStudentEligibility(student.id);
                 const confList = dbStore.getConferenceEvidence(student.id);
@@ -234,10 +286,10 @@ export default function TeacherDashboard() {
                     {/* Student Info */}
                     <td className="py-3.5 px-4">
                       <div className="flex items-center space-x-3">
-                        <img
+                        <Avatar
                           src={student.avatarUrl}
-                          alt={student.firstNameTh}
-                          className="w-8 h-8 rounded-full object-cover"
+                          name={`${student.firstNameTh} ${student.lastNameTh}`}
+                          className="w-8 h-8 rounded-full object-cover bg-neutral-100"
                         />
                         <div>
                           <p className="font-bold text-neutral-charcoal">
@@ -245,6 +297,7 @@ export default function TeacherDashboard() {
                           </p>
                           <span className="text-[11px] text-neutral-400 font-mono">
                             {student.studentCode}
+                            {!student.profileCompleted && <span className="ml-1 text-amber-600">• ยังไม่กรอกโปรไฟล์</span>}
                           </span>
                         </div>
                       </div>
@@ -253,6 +306,21 @@ export default function TeacherDashboard() {
                     {/* Track */}
                     <td className="py-3.5 px-3 font-semibold text-ssru-crimson">
                       {student.trackId}
+                    </td>
+
+                    {/* QE prerequisite: 3-chapter proposal exam (advisor confirms) */}
+                    <td className="py-3.5 px-3">
+                      <button
+                        onClick={() => handleToggle3Chapter(student)}
+                        title={student.passed3Chapter ? "คลิกเพื่อยกเลิกสถานะผ่าน 3 บท" : "คลิกเพื่อยืนยันว่าสอบผ่าน 3 บท (เปิดสิทธิ์จอง QE)"}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                          student.passed3Chapter
+                            ? "bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-200"
+                            : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                        }`}
+                      >
+                        {student.passed3Chapter ? "✓ ผ่านแล้ว" : "ยืนยันผ่าน 3 บท"}
+                      </button>
                     </td>
 
                     {/* Condition 1: Advisor Logs */}

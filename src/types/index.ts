@@ -12,12 +12,25 @@ export interface UserProfile {
   photoURL?: string;
   phone?: string;
   studentId?: string; // Student code e.g. 64123456001
-  teacherCode?: string; // Teacher code e.g. T-101
+  teacherCode?: string; // Teacher code e.g. kwanruan.ru
   department: string;
   createdAt: string;
 }
 
-export interface Student {
+/**
+ * Credential & onboarding state shared by every account type.
+ * Passwords are verified against `passwordHash` (PBKDF2). When no hash is stored
+ * yet, the default password rule applies: password === account code.
+ */
+export interface AccountSecurity {
+  passwordHash?: string;
+  passwordChanged?: boolean;
+  authProvisioned?: boolean; // Firebase Auth user has been created for this e-mail
+  profileCompleted?: boolean; // First-login profile form has been submitted
+  lastLoginAt?: string;
+}
+
+export interface Student extends AccountSecurity {
   id: string;
   uid: string;
   studentCode: string;
@@ -30,9 +43,9 @@ export interface Student {
   email: string;
   phone: string;
   trackId: TrackType;
-  yearLevel: number; // 1-4
+  yearLevel: number; // 1-8 (derived from the enrolment year in the student code)
   status: 'active' | 'graduated' | 'suspended';
-  advisorId: string;
+  advisorId: string; // Teacher id, "CUSTOM-<name>" for an external advisor, or "" when unassigned
   coAdvisorId?: string;
   projectTitleTh?: string;
   projectTitleEn?: string;
@@ -42,20 +55,31 @@ export interface Student {
   avatarUrl?: string;
 }
 
-export interface Teacher {
+export interface Teacher extends AccountSecurity {
   id: string;
   uid: string;
-  teacherCode: string;
+  teacherCode: string; // Login code = e-mail local part, e.g. "kwanruan.ru"
   prefixTh: string;
   firstNameTh: string;
   lastNameTh: string;
-  academicRankTh: string; // เช่น ผศ.ดร., อ.ดร., ผศ.
+  academicRankTh: string; // เช่น ผู้ช่วยศาสตราจารย์ ดร., อาจารย์
   email: string;
   phone: string;
+  department?: string; // สาขาวิชา
+  faculty?: string;
+  website?: string;
   specializations: TrackType[];
   isCommittee: boolean;
   avatarUrl?: string;
   currentAdviseesCount?: number;
+}
+
+export interface AdminAccount extends AccountSecurity {
+  id: string;
+  code: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
 }
 
 export interface Track {

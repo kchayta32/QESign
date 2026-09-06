@@ -3,7 +3,9 @@
 import React from "react";
 import { Student, FinalExamEligibility } from "@/types";
 import { formatThaiDate } from "@/lib/utils";
-import { X, Award, Printer, CheckCircle2, ShieldCheck, Sparkles } from "lucide-react";
+import { dbStore } from "@/lib/firebase/db";
+import { DEPARTMENT_CE_TH, FACULTY_NAME_TH, UNIVERSITY_NAME_TH } from "@/lib/institution";
+import { X, Award, Printer, CheckCircle2, ShieldCheck } from "lucide-react";
 
 interface FinalCertificateModalProps {
   student: Student;
@@ -23,6 +25,10 @@ export default function FinalCertificateModal({
   const handlePrint = () => {
     window.print();
   };
+
+  const advisorName = dbStore.getTeacherDisplayName(student.advisorId);
+  const finalRound = dbStore.getActiveRound("FINAL_DEFENSE");
+  const semesterLabel = finalRound ? `${finalRound.semester}/${finalRound.academicYear}` : "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150 print:p-0 print:bg-white">
@@ -68,10 +74,10 @@ export default function FinalCertificateModal({
                 <ShieldCheck className="w-9 h-9" />
               </div>
               <h3 className="text-base font-bold font-display text-ssru-crimson tracking-tight">
-                สาขาวิชาวิศวกรรมคอมพิวเตอร์ คณะเทคโนโลยีอุตสาหกรรม
+                {DEPARTMENT_CE_TH} {FACULTY_NAME_TH}
               </h3>
               <h4 className="text-xs font-medium text-neutral-600">
-                มหาวิทยาลัยราชภัฏสวนสุนันทา
+                {UNIVERSITY_NAME_TH}
               </h4>
               <div className="inline-block px-4 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold mt-2">
                 หนังสือรับรองคุณสมบัติการสอบป้องกันโครงงานวิศวกรรมคอมพิวเตอร์
@@ -125,28 +131,24 @@ export default function FinalCertificateModal({
               </div>
 
               <p className="text-xs font-bold text-emerald-800 pt-1">
-                มีสิทธิ์ยื่นขอสอบป้องกันโครงงานฉบับสมบูรณ์ (Final Project Defense) ประจำภาคเรียนที่ 1/2567
+                มีสิทธิ์ยื่นขอสอบป้องกันโครงงานฉบับสมบูรณ์ (Final Project Defense){semesterLabel ? ` ประจำภาคเรียนที่ ${semesterLabel}` : ""}
               </p>
             </div>
 
-            {/* Certificate Signatures & Official Stamp */}
+            {/* Signature blocks (to be signed by hand on the printed copy) */}
             <div className="grid grid-cols-2 gap-6 pt-8 mt-6 border-t border-neutral-200 text-center text-xs">
               <div className="space-y-1">
-                <div className="h-10 flex items-end justify-center">
-                  <span className="font-serif italic text-ssru-crimson text-sm">Surachai E.</span>
-                </div>
-                <div className="border-t border-neutral-400 max-w-[160px] mx-auto pt-1">
-                  <p className="font-bold text-neutral-charcoal">ผศ.ดร.สุรชัย เอกอนันต์</p>
-                  <p className="text-[10px] text-neutral-500">ประธานสาขาวิชาวิศวกรรมคอมพิวเตอร์</p>
+                <div className="h-10" />
+                <div className="border-t border-neutral-400 max-w-[180px] mx-auto pt-1">
+                  <p className="font-bold text-neutral-charcoal">(............................................)</p>
+                  <p className="text-[10px] text-neutral-500">หัวหน้า{DEPARTMENT_CE_TH}</p>
                 </div>
               </div>
 
               <div className="space-y-1">
-                <div className="h-10 flex items-end justify-center">
-                  <span className="font-serif italic text-ssru-crimson text-sm">Somkiat P.</span>
-                </div>
-                <div className="border-t border-neutral-400 max-w-[160px] mx-auto pt-1">
-                  <p className="font-bold text-neutral-charcoal">ผศ.สมเกียรติ พงษ์ศิริ</p>
+                <div className="h-10" />
+                <div className="border-t border-neutral-400 max-w-[180px] mx-auto pt-1">
+                  <p className="font-bold text-neutral-charcoal">{advisorName}</p>
                   <p className="text-[10px] text-neutral-500">อาจารย์ที่ปรึกษาโครงงาน</p>
                 </div>
               </div>
@@ -154,7 +156,7 @@ export default function FinalCertificateModal({
 
             {/* Verification Code Footer */}
             <div className="mt-8 pt-3 border-t border-dashed border-neutral-200 flex items-center justify-between text-[10px] text-neutral-400">
-              <span>รหัสรับรอง: {eligibility.certificateCode || "SSRU-CE-2026-001"}</span>
+              <span>รหัสรับรอง: {eligibility.certificateCode || "-"}</span>
               <span>ออกให้ ณ วันที่ {formatThaiDate(new Date().toISOString())}</span>
             </div>
           </div>

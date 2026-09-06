@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import Header from "@/components/Header";
+import { DEPARTMENT_CE_TH, FACULTY_NAME_TH, UNIVERSITY_NAME_TH } from "@/lib/institution";
 
 export const metadata: Metadata = {
   title: "SSRU CE QE & Project Booking System | มรภ.สวนสุนันทา",
-  description: "ระบบจองสอบวัดคุณสมบัติ (QE) และบริหารจัดการสิทธิ์สอบโครงงาน สาขาวิชาวิศวกรรมคอมพิวเตอร์ คณะเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยราชภัฏสวนสุนันทา",
+  description: `ระบบจองสอบวัดคุณสมบัติ (QE) และบริหารจัดการสิทธิ์สอบโครงงาน ${DEPARTMENT_CE_TH} ${FACULTY_NAME_TH} ${UNIVERSITY_NAME_TH}`,
   icons: {
     icon: "/favicon.ico",
   },
@@ -27,10 +28,10 @@ export default function RootLayout({
           <footer className="bg-white border-t border-neutral-200 py-6 text-center text-xs text-neutral-500">
             <div className="max-w-7xl mx-auto px-4 space-y-1">
               <p className="font-semibold text-neutral-charcoal">
-                สาขาวิชาวิศวกรรมคอมพิวเตอร์ คณะเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยราชภัฏสวนสุนันทา
+                {DEPARTMENT_CE_TH} {FACULTY_NAME_TH} {UNIVERSITY_NAME_TH}
               </p>
               <p className="text-[11px] text-neutral-400">
-                SSRU Computer Engineering Qualifying Examination &amp; Final Defense Gate Platform • Firebase v10 Enabled
+                SSRU Computer Engineering Qualifying Examination &amp; Final Defense Gate Platform • Firebase Realtime Database
               </p>
             </div>
           </footer>

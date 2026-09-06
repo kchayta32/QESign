@@ -1,13 +1,19 @@
 {
   "name": "qe-sign",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next dev",
+    "build": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next build",
+    "start": "node -r ./scripts/patch-fs.js ./node_modules/next/dist/bin/next start",
     "lint": "next lint",
-    "test:rules": "node scripts/test-rules.js"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run test:rules && npm run test:password && npm run test:auth",
+    "test:rules": "node -r ./scripts/register-ts.js scripts/test-rules.js",
+    "test:password": "node -r ./scripts/register-ts.js scripts/test-password.js",
+    "test:auth": "node -r ./scripts/register-ts.js scripts/test-auth.js",
+    "seed:firebase": "node -r ./scripts/register-ts.js scripts/seed-firebase.js",
+    "probe:firebase": "node scripts/probe-firebase.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

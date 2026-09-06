@@ -28,7 +28,9 @@ import {
   ChevronRight,
   Radio
 } from "lucide-react";
-import { QEBooking, TrackType } from "@/types";
+import { QEBooking } from "@/types";
+import Avatar from "./Avatar";
+import { DEPARTMENT_CE_TH } from "@/lib/institution";
 
 export default function StudentDashboard() {
   const { currentStudent } = useAuth();
@@ -38,22 +40,26 @@ export default function StudentDashboard() {
   const [isConferenceModalOpen, setIsConferenceModalOpen] = useState(false);
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
 
+  if (!currentStudent) {
+    return (
+      <div className="p-8 text-center text-neutral-500">
+        <p>ไม่พบข้อมูลนักศึกษา กรุณาเข้าสู่ระบบใหม่อีกครั้ง</p>
+      </div>
+    );
+  }
+
   const tracks = dbStore.getTracks();
   const examRounds = dbStore.getExamRounds();
   const eligibility = dbStore.getStudentEligibility(currentStudent.id);
-  const studentBookings = dbStore.getQEBookingsByStudent(currentStudent.id);
+  const studentBookings = dbStore
+    .getQEBookingsByStudent(currentStudent.id)
+    .filter((b) => b.status !== "cancelled");
   const latestBooking = studentBookings[0];
-  const qeResult = dbStore.getQEResultByStudent(currentStudent.id);
-  const teachers = dbStore.getTeachers();
-  const advisor = teachers.find((t) => t.id === currentStudent.advisorId);
-  const advisorDisplayName = currentStudent.advisorId?.startsWith("CUSTOM-")
-    ? currentStudent.advisorId.replace("CUSTOM-", "")
-    : advisor
-    ? `${advisor.prefixTh}${advisor.firstNameTh} ${advisor.lastNameTh}`
-    : "ผศ.ดร.ขวัญเรือน รัศมี";
+  const qeResult = latestBooking ? dbStore.getQEResultByBooking(latestBooking.id) : undefined;
+  const advisorDisplayName = dbStore.getTeacherDisplayName(currentStudent.advisorId);
 
-  const handleBookingSuccess = (booking: QEBooking) => {
-    // State will be synced via context & Realtime Database
+  const handleBookingSuccess = (_booking: QEBooking) => {
+    // State is synced via the data store subscription & Realtime Database.
   };
 
   return (
@@ -62,10 +68,10 @@ export default function StudentDashboard() {
       <div className="bg-white rounded-3xl p-6 md:p-8 shadow-soft border border-neutral-200/80 relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div className="flex items-center space-x-4">
-            <img
-              src={currentStudent.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"}
-              alt={currentStudent.firstNameTh}
-              className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-cover border-2 border-ssru-crimson/20 shadow-md flex-shrink-0"
+            <Avatar
+              src={currentStudent.avatarUrl}
+              name={`${currentStudent.firstNameTh} ${currentStudent.lastNameTh}`}
+              className="w-16 h-16 md:w-20 md:h-20 rounded-2xl object-cover border-2 border-ssru-crimson/20 shadow-md flex-shrink-0 bg-white"
             />
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -84,7 +90,7 @@ export default function StudentDashboard() {
                 {currentStudent.prefixTh} {currentStudent.firstNameTh} {currentStudent.lastNameTh}
               </h2>
               <p className="text-xs text-neutral-500 font-mono mt-0.5">
-                รหัสนักศึกษา: <span className="font-bold text-neutral-charcoal">{currentStudent.studentCode}</span> • สาขาวิชาวิศวกรรมคอมพิวเตอร์
+                รหัสนักศึกษา: <span className="font-bold text-neutral-charcoal">{currentStudent.studentCode}</span> • {DEPARTMENT_CE_TH}
               </p>
             </div>
           </div>
@@ -123,7 +129,7 @@ export default function StudentDashboard() {
             <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
               currentStudent.passed3Chapter ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
             }`}>
-              {currentStudent.passed3Chapter ? "ผ่านแล้ว (พร้อมสอบ QE)" : "ยังไม่ผ่าน"}
+              {currentStudent.passed3Chapter ? "ผ่านแล้ว (พร้อมสอบ QE)" : "รออาจารย์ที่ปรึกษายืนยันผลสอบ 3 บท"}
             </span>
           </div>
         </div>

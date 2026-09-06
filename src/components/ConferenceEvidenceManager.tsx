@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ConferenceEvidence, Student, Teacher, UserRole } from "@/types";
 import { dbStore } from "@/lib/firebase/db";
 import { formatThaiDate } from "@/lib/utils";
@@ -48,7 +48,15 @@ export default function ConferenceEvidenceManager({
   const [conferenceLevel, setConferenceLevel] = useState<"national" | "international">("national");
   const [indexedBy, setIndexedBy] = useState<"TCI-1" | "TCI-2" | "Scopus" | "IEEE Xplore" | "Other">("TCI-1");
   const [proofType, setProofType] = useState<"certificate" | "proceeding" | "acceptance_letter">("acceptance_letter");
-  const [fileName, setFileName] = useState<string>("Acceptance_Letter.pdf");
+  const [proofUrl, setProofUrl] = useState<string>("");
+  const [fileName, setFileName] = useState<string>("");
+  const [formError, setFormError] = useState<string>("");
+
+  useEffect(() => {
+    const refresh = () => setEvidenceList(dbStore.getConferenceEvidence(student.id));
+    refresh();
+    return dbStore.subscribe(refresh);
+  }, [student.id]);
 
   if (!isOpen) return null;
 
@@ -58,38 +66,52 @@ export default function ConferenceEvidenceManager({
 
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!paperTitle || !conferenceName) return;
+    setFormError("");
+    if (!paperTitle.trim() || !conferenceName.trim()) {
+      setFormError("กรุณากรอกชื่อบทความและชื่องานประชุมวิชาการ");
+      return;
+    }
+    const url = proofUrl.trim();
+    if (!/^https?:\/\/.+/i.test(url)) {
+      setFormError("กรุณาระบุลิงก์เอกสารหลักฐาน (Google Drive / OneDrive / URL ของ Proceeding) ที่เริ่มต้นด้วย http:// หรือ https://");
+      return;
+    }
 
     dbStore.addConferenceEvidence({
       studentId: student.id,
       studentUid: student.uid,
       studentCode: student.studentCode,
-      studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`,
+      studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`.trim(),
       projectTitle: student.projectTitleTh || "โครงงานวิศวกรรมคอมพิวเตอร์",
-      paperTitle,
-      conferenceName,
+      paperTitle: paperTitle.trim(),
+      conferenceName: conferenceName.trim(),
       presentationDate,
       conferenceLevel,
       indexedBy,
       proofType,
-      proofFileUrl: "https://example.com/files/uploaded_evidence_document.pdf",
-      fileName: fileName || "Proof_Document.pdf",
-      fileSize: "2.1 MB",
+      proofFileUrl: url,
+      fileName: fileName.trim() || url.split("/").pop() || "Proof_Document",
       status: "pending",
+      reviewedByAdvisorId: student.advisorId || undefined,
+      reviewedByAdvisorName: student.advisorId ? dbStore.getTeacherDisplayName(student.advisorId) : undefined,
       submissionDate: new Date().toISOString().split("T")[0],
     });
 
     refreshEvidence();
     setShowUploadForm(false);
+    setProofUrl("");
+    setFileName("");
   };
 
   const handleVerify = (evidenceId: string) => {
-    dbStore.updateConferenceStatus(evidenceId, "verified");
+    dbStore.updateConferenceStatus(evidenceId, "verified", undefined, currentTeacher);
     refreshEvidence();
   };
 
   const handleReject = (evidenceId: string) => {
-    dbStore.updateConferenceStatus(evidenceId, "rejected", "เอกสารไม่สมบูรณ์ ขาดตราประทับหรือลายเซ็น");
+    const reason = window.prompt("ระบุเหตุผลที่ปฏิเสธเอกสาร", "เอกสารไม่สมบูรณ์ ขาดตราประทับหรือลายเซ็น");
+    if (reason === null) return;
+    dbStore.updateConferenceStatus(evidenceId, "rejected", reason || "เอกสารไม่สมบูรณ์", currentTeacher);
     refreshEvidence();
   };
 
@@ -276,14 +298,33 @@ export default function ConferenceEvidenceManager({
                 </div>
               </div>
 
-              {/* Mock File Upload box */}
-              <div className="p-4 rounded-xl border border-dashed border-neutral-300 bg-white text-center">
-                <UploadCloud className="w-8 h-8 text-neutral-400 mx-auto mb-1.5" />
-                <p className="text-xs font-semibold text-neutral-700">
-                  ไฟล์แนบ: {fileName} (ขนาด 2.1 MB)
-                </p>
-                <p className="text-[11px] text-neutral-400 mt-0.5">
-                  รองรับไฟล์ PDF, JPG, PNG ขนาดไม่เกิน 10MB
+              {formError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs">{formError}</div>
+              )}
+
+              {/* Evidence link */}
+              <div className="p-4 rounded-xl border border-dashed border-neutral-300 bg-white space-y-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-neutral-700">
+                  <UploadCloud className="w-4 h-4 text-ssru-crimson" />
+                  <span>ลิงก์เอกสารหลักฐาน *</span>
+                </div>
+                <input
+                  type="url"
+                  value={proofUrl}
+                  onChange={(e) => setProofUrl(e.target.value)}
+                  placeholder="https://drive.google.com/... หรือ URL ของ Proceeding / Acceptance Letter"
+                  className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5"
+                  required
+                />
+                <input
+                  type="text"
+                  value={fileName}
+                  onChange={(e) => setFileName(e.target.value)}
+                  placeholder="ชื่อไฟล์ / คำอธิบายเอกสาร (เช่น ECTI-CON_2026_Acceptance_Letter.pdf)"
+                  className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5"
+                />
+                <p className="text-[11px] text-neutral-400">
+                  อัปโหลดไฟล์ PDF/JPG/PNG ไว้ใน Google Drive ของมหาวิทยาลัย แล้วแชร์ลิงก์แบบ &quot;ทุกคนที่มีลิงก์สามารถดูได้&quot; เพื่อให้อาจารย์ตรวจสอบ
                 </p>
               </div>
 
@@ -377,7 +418,7 @@ export default function ConferenceEvidenceManager({
                             ? "หนังสือตอบรับ (Acceptance Letter)"
                             : item.proofType === "proceeding"
                             ? "Proceeding"
-                            : "เกียรติบัตร"} • {item.fileSize || "1.4 MB"}
+                            : "เกียรติบัตร"}{item.fileSize ? ` • ${item.fileSize}` : ""}
                         </span>
                       </div>
                     </div>
@@ -392,6 +433,16 @@ export default function ConferenceEvidenceManager({
                       <span className="hidden sm:inline">เปิดดูเอกสาร</span>
                     </a>
                   </div>
+
+                  {item.status === "rejected" && item.rejectionReason && (
+                    <div className="text-xs p-2.5 rounded-xl bg-red-50 border border-red-100 text-red-900 flex items-start gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />
+                      <span><span className="font-bold">เหตุผลที่ไม่ผ่าน:</span> {item.rejectionReason}</span>
+                    </div>
+                  )}
+                  {item.status === "verified" && item.reviewedByAdvisorName && (
+                    <p className="text-[11px] text-emerald-700">รับรองโดย {item.reviewedByAdvisorName}{item.verifiedAt ? ` • ${formatThaiDate(item.verifiedAt)}` : ""}</p>
+                  )}
 
                   {/* Teacher Verification Actions */}
                   {role === "teacher" && item.status === "pending" && (

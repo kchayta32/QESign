@@ -2,206 +2,272 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile,
-  User as FirebaseUser
+  reauthenticateWithCredential,
+  EmailAuthProvider
 } from "firebase/auth";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import { auth, db } from "./config";
-import { dbStore } from "./db";
-import { Student, UserProfile, TrackType } from "@/types";
+import { auth } from "./config";
+import { dbStore, AccountKind } from "./db";
+import { hashPassword, verifyPassword, validateNewPassword } from "@/lib/security/password";
+import { studentEmailFromCode } from "@/lib/institution";
+import type { Student, Teacher, AdminAccount, AccountSecurity, UserRole } from "@/types";
 
-export interface StudentRegistrationData {
-  studentCode: string;
-  prefixTh: string;
-  firstNameTh: string;
-  lastNameTh: string;
-  prefixEn?: string;
-  firstNameEn?: string;
-  lastNameEn?: string;
+/**
+ * Authentication model
+ * --------------------
+ * Every account (student / teacher / admin) is pre-registered in the data store.
+ *   • Login identifier : student code, teacher code (e-mail local part) or e-mail.
+ *   • Default password : the account's code (e.g. 66122519001, parinwat.th).
+ *   • Changed passwords are stored as a PBKDF2 hash on the account record in the
+ *     Realtime Database, so verification does not depend on Firebase Auth being
+ *     enabled. Firebase Auth is provisioned opportunistically (best effort) so that
+ *     Firestore security rules can rely on request.auth once Auth is switched on.
+ */
+
+export interface ResolvedAccount {
+  kind: AccountKind;
+  id: string;
+  code: string;
   email: string;
-  password: string;
-  phone: string;
-  trackId: TrackType;
-  yearLevel: number;
-  advisorId: string;
-  coAdvisorId?: string;
-  projectTitleTh?: string;
-  projectTitleEn?: string;
-  avatarUrl?: string;
+  displayName: string;
+  security: AccountSecurity;
+  needsProfileSetup: boolean;
+}
+
+export interface LoginResult {
+  success: boolean;
+  role?: UserRole;
+  entityId?: string;
+  needsProfileSetup?: boolean;
+  error?: string;
+}
+
+const GENERIC_LOGIN_ERROR = "ไม่พบบัญชีผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบข้อมูล";
+
+function norm(value: string | undefined | null): string {
+  return (value || "").trim().toLowerCase();
+}
+
+function toResolved(kind: AccountKind, entity: Student | Teacher | AdminAccount): ResolvedAccount {
+  if (kind === "student") {
+    const s = entity as Student;
+    return {
+      kind,
+      id: s.id,
+      code: s.studentCode,
+      email: s.email || studentEmailFromCode(s.studentCode),
+      displayName: `${s.prefixTh} ${s.firstNameTh} ${s.lastNameTh}`.trim(),
+      security: s,
+      needsProfileSetup: !s.profileCompleted,
+    };
+  }
+  if (kind === "teacher") {
+    const t = entity as Teacher;
+    return {
+      kind,
+      id: t.id,
+      code: t.teacherCode,
+      email: t.email,
+      displayName: `${t.prefixTh}${t.firstNameTh} ${t.lastNameTh}`.trim(),
+      security: t,
+      needsProfileSetup: !t.profileCompleted,
+    };
+  }
+  const a = entity as AdminAccount;
+  return {
+    kind,
+    id: a.id,
+    code: a.code,
+    email: a.email,
+    displayName: a.displayName,
+    security: a,
+    needsProfileSetup: false,
+  };
+}
+
+/** Find the account matching a login identifier (code, id or e-mail; case-insensitive). */
+export function resolveAccount(identifier: string): ResolvedAccount | undefined {
+  const id = norm(identifier);
+  if (!id) return undefined;
+
+  const student = dbStore.getStudents().find(
+    (s) =>
+      norm(s.studentCode) === id ||
+      norm(s.id) === id ||
+      norm(s.email) === id ||
+      norm(studentEmailFromCode(s.studentCode)) === id
+  );
+  if (student) return toResolved("student", student);
+
+  const teacher = dbStore.getTeachers().find(
+    (t) => norm(t.teacherCode) === id || norm(t.id) === id || norm(t.email) === id
+  );
+  if (teacher) return toResolved("teacher", teacher);
+
+  const admin = dbStore.getAdmins().find(
+    (a) => norm(a.code) === id || norm(a.id) === id || norm(a.email) === id
+  );
+  if (admin) return toResolved("admin", admin);
+
+  return undefined;
+}
+
+/** Password check: stored hash if present, otherwise the default-password rule. */
+export async function verifyAccountPassword(account: ResolvedAccount, password: string): Promise<boolean> {
+  if (!password) return false;
+  if (account.security.passwordHash) {
+    return verifyPassword(password, account.code, account.security.passwordHash);
+  }
+  return password === account.code;
 }
 
 /**
- * Register a new student with Firebase Auth and save profile in Firestore & DB store
+ * Best-effort Firebase Auth sync. Never throws; returns the Firebase uid when a session
+ * was established. Silently skips when Auth is disabled on the project
+ * (auth/configuration-not-found) or the network is unavailable.
  */
-export async function registerStudentAccount(
-  data: StudentRegistrationData
-): Promise<{ success: boolean; student?: Student; error?: string }> {
+async function syncFirebaseAuth(account: ResolvedAccount, password: string): Promise<string | undefined> {
+  if (!auth) return undefined;
   try {
-    const email = data.email.includes("@")
-      ? data.email
-      : `s${data.studentCode}@ssru.ac.th`;
-
-    let firebaseUid = `std_${data.studentCode}_${Date.now().toString().slice(-4)}`;
-
-    // Try creating account in Firebase Auth
-    try {
-      if (auth) {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          data.password
-        );
-        firebaseUid = userCredential.user.uid;
-
-        // Update Firebase Auth profile display name and photo
-        await updateProfile(userCredential.user, {
-          displayName: `${data.prefixTh} ${data.firstNameTh} ${data.lastNameTh}`,
-          photoURL: data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-        });
-      }
-    } catch (authErr: any) {
-      console.warn("Firebase Auth notice (using fallback local profile):", authErr?.message);
-    }
-
-    const defaultAvatar = data.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150";
-
-    const newStudent: Student = {
-      id: `STD-${data.studentCode}`,
-      uid: firebaseUid,
-      studentCode: data.studentCode,
-      prefixTh: data.prefixTh,
-      firstNameTh: data.firstNameTh,
-      lastNameTh: data.lastNameTh,
-      prefixEn: data.prefixEn || "Mr.",
-      firstNameEn: data.firstNameEn || data.firstNameTh,
-      lastNameEn: data.lastNameEn || data.lastNameTh,
-      email: email,
-      phone: data.phone || "080-000-0000",
-      trackId: data.trackId,
-      yearLevel: data.yearLevel || 4,
-      status: "active",
-      advisorId: data.advisorId || "T-101",
-      coAdvisorId: data.coAdvisorId,
-      projectTitleTh: data.projectTitleTh || "โครงงานวิศวกรรมคอมพิวเตอร์",
-      projectTitleEn: data.projectTitleEn || "Computer Engineering Project",
-      passed3Chapter: true, // Default active student ready for QE
-      passedQE: false,
-      finalEligible: false,
-      avatarUrl: defaultAvatar,
-    };
-
-    // Save to DB store (LocalStorage + Realtime State)
-    dbStore.registerNewStudent(newStudent);
-
-    // Save to Firestore if available
-    try {
-      if (db) {
-        const studentDocRef = doc(db, "students", newStudent.id);
-        await setDoc(studentDocRef, newStudent, { merge: true });
-
-        const userDocRef = doc(db, "users", firebaseUid);
-        const userProfile: UserProfile = {
-          uid: firebaseUid,
-          email: email,
-          displayName: `${data.prefixTh} ${data.firstNameTh} ${data.lastNameTh}`,
-          role: "student",
-          studentId: data.studentCode,
-          phone: data.phone,
-          department: "สาขาวิชาวิศวกรรมคอมพิวเตอร์",
-          photoURL: defaultAvatar,
-          createdAt: new Date().toISOString(),
-        };
-        await setDoc(userDocRef, userProfile, { merge: true });
-      }
-    } catch (firestoreErr) {
-      console.warn("Firestore write notice:", firestoreErr);
-    }
-
-    return { success: true, student: newStudent };
+    const cred = await signInWithEmailAndPassword(auth, account.email, password);
+    return cred.user.uid;
   } catch (err: any) {
-    console.error("Registration error:", err);
-    return {
-      success: false,
-      error: err.message || "เกิดข้อผิดพลาดในการลงทะเบียน กรุณาลองใหม่อีกครั้ง",
-    };
+    const code: string = err?.code || "";
+    const canCreate =
+      !account.security.authProvisioned &&
+      (code === "auth/user-not-found" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials");
+    if (!canCreate) {
+      if (code && !["auth/wrong-password", "auth/invalid-credential", "auth/invalid-login-credentials"].includes(code)) {
+        console.debug("Firebase Auth unavailable, continuing with database credentials:", code);
+      }
+      return undefined;
+    }
+    try {
+      const created = await createUserWithEmailAndPassword(auth, account.email, password);
+      await updateProfile(created.user, { displayName: account.displayName }).catch(() => undefined);
+      return created.user.uid;
+    } catch (createErr: any) {
+      console.debug("Firebase Auth provisioning skipped:", createErr?.code || createErr?.message);
+      return undefined;
+    }
   }
 }
 
 /**
- * Login with Email/StudentCode and Password
+ * Login with student code / teacher code / e-mail + password.
  */
-export async function loginAccount(
-  identifier: string,
-  password: string
-): Promise<{ success: boolean; role?: "student" | "teacher" | "admin"; entityId?: string; error?: string }> {
+export async function loginAccount(identifier: string, password: string): Promise<LoginResult> {
   try {
-    const isEmail = identifier.includes("@");
-    const email = isEmail ? identifier : `s${identifier}@ssru.ac.th`;
+    const account = resolveAccount(identifier);
+    if (!account) return { success: false, error: GENERIC_LOGIN_ERROR };
 
-    // Check existing students in DB store
-    const students = dbStore.getStudents();
-    const matchedStudent = students.find(
-      (s) =>
-        s.studentCode === identifier ||
-        s.email.toLowerCase() === identifier.toLowerCase() ||
-        s.email.toLowerCase() === email.toLowerCase()
-    );
+    const ok = await verifyAccountPassword(account, password);
+    if (!ok) return { success: false, error: GENERIC_LOGIN_ERROR };
 
-    if (matchedStudent) {
-      // Try Firebase Auth login if possible
-      try {
-        if (auth) {
-          await signInWithEmailAndPassword(auth, email, password);
-        }
-      } catch (authError) {
-        console.warn("Firebase Auth login notice:", authError);
-      }
-      return { success: true, role: "student", entityId: matchedStudent.id };
+    const uid = await syncFirebaseAuth(account, password);
+    const securityUpdate: Partial<AccountSecurity> & { uid?: string } = {
+      lastLoginAt: new Date().toISOString(),
+    };
+    if (uid) {
+      securityUpdate.authProvisioned = true;
+      securityUpdate.uid = uid;
     }
-
-    // Check existing teachers in DB store
-    const teachers = dbStore.getTeachers();
-    const matchedTeacher = teachers.find(
-      (t) =>
-        t.teacherCode === identifier ||
-        t.email.toLowerCase() === identifier.toLowerCase()
-    );
-
-    if (matchedTeacher) {
-      return { success: true, role: "teacher", entityId: matchedTeacher.id };
-    }
-
-    // Admin login shortcut
-    if (identifier.toLowerCase() === "admin" || identifier.toLowerCase() === "admin@ssru.ac.th") {
-      return { success: true, role: "admin", entityId: "ADMIN-01" };
-    }
-
-    // If not found in mock/store, try Firebase Auth
-    if (auth) {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      return { success: true, role: "student", entityId: userCredential.user.uid };
-    }
+    dbStore.updateAccountSecurity(account.kind, account.id, securityUpdate);
 
     return {
-      success: false,
-      error: "ไม่พบบัญชีผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบข้อมูล",
+      success: true,
+      role: account.kind,
+      entityId: account.id,
+      needsProfileSetup: account.needsProfileSetup,
     };
   } catch (err: any) {
-    return {
-      success: false,
-      error: err.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ",
-    };
+    console.error("Login error:", err);
+    return { success: false, error: err?.message || "เกิดข้อผิดพลาดในการเข้าสู่ระบบ" };
   }
 }
 
 /**
- * Logout current account
+ * Change the password of the signed-in account. Verifies the current password first,
+ * stores the new PBKDF2 hash in the database and (best effort) updates Firebase Auth.
  */
+export async function changeAccountPassword(
+  kind: AccountKind,
+  entityId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  const entity =
+    kind === "student"
+      ? dbStore.getStudentById(entityId)
+      : kind === "teacher"
+      ? dbStore.getTeacherById(entityId)
+      : dbStore.getAdminById(entityId);
+  if (!entity) return { success: false, error: "ไม่พบบัญชีผู้ใช้งาน" };
+
+  const account = toResolved(kind, entity);
+  const validation = validateNewPassword(newPassword);
+  if (validation) return { success: false, error: validation };
+  if (newPassword === account.code) {
+    return { success: false, error: "รหัสผ่านใหม่ต้องไม่เหมือนกับรหัสประจำตัว (รหัสผ่านเริ่มต้น)" };
+  }
+
+  const ok = await verifyAccountPassword(account, currentPassword);
+  if (!ok) return { success: false, error: "รหัสผ่านปัจจุบันไม่ถูกต้อง" };
+
+  const passwordHash = await hashPassword(newPassword, account.code);
+  dbStore.updateAccountSecurity(kind, account.id, { passwordHash, passwordChanged: true });
+
+  // Keep Firebase Auth in step when a session exists (ignored when Auth is disabled).
+  try {
+    if (auth?.currentUser && norm(auth.currentUser.email) === norm(account.email)) {
+      const credential = EmailAuthProvider.credential(account.email, currentPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await updatePassword(auth.currentUser, newPassword);
+    }
+  } catch (e: any) {
+    console.debug("Firebase Auth password sync skipped:", e?.code || e?.message);
+  }
+
+  return { success: true };
+}
+
+/**
+ * Set a brand-new password during first-login profile setup (no current password
+ * prompt: the caller has just authenticated with the default password).
+ */
+export async function setInitialPassword(kind: AccountKind, entityId: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+  const entity =
+    kind === "student"
+      ? dbStore.getStudentById(entityId)
+      : kind === "teacher"
+      ? dbStore.getTeacherById(entityId)
+      : dbStore.getAdminById(entityId);
+  if (!entity) return { success: false, error: "ไม่พบบัญชีผู้ใช้งาน" };
+  const account = toResolved(kind, entity);
+
+  const validation = validateNewPassword(newPassword);
+  if (validation) return { success: false, error: validation };
+  if (newPassword === account.code) {
+    return { success: false, error: "รหัสผ่านใหม่ต้องไม่เหมือนกับรหัสประจำตัว (รหัสผ่านเริ่มต้น)" };
+  }
+
+  const passwordHash = await hashPassword(newPassword, account.code);
+  dbStore.updateAccountSecurity(kind, account.id, { passwordHash, passwordChanged: true });
+
+  try {
+    if (auth?.currentUser && norm(auth.currentUser.email) === norm(account.email)) {
+      await updatePassword(auth.currentUser, newPassword);
+    }
+  } catch (e: any) {
+    console.debug("Firebase Auth password sync skipped:", e?.code || e?.message);
+  }
+  return { success: true };
+}
+
 export async function logoutAccount(): Promise<void> {
   try {
-    if (auth) {
-      await signOut(auth);
-    }
+    if (auth?.currentUser) await signOut(auth);
   } catch (e) {
     console.warn("Logout notice:", e);
   }

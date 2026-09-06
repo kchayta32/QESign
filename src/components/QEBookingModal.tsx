@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { Student, Track, ExamRound, QEBooking, TrackType } from "@/types";
 import { dbStore } from "@/lib/firebase/db";
 import { checkQEBookingPrerequisite } from "@/lib/rules/engine";
+import { DEPARTMENT_CE_TH, FACULTY_NAME_TH, UNIVERSITY_NAME_TH } from "@/lib/institution";
 import {
   X,
   Calendar,
@@ -34,46 +35,92 @@ export default function QEBookingModal({
   onClose,
   onSuccess,
 }: QEBookingModalProps) {
+  const qeRounds = rounds.filter((r) => r.type === "QE");
+  const initialRound = qeRounds.find((r) => r.isActive) || qeRounds[0];
+  const today = new Date().toISOString().split("T")[0];
+
   const [selectedTrack, setSelectedTrack] = useState<TrackType>(student.trackId || "SW");
-  const [selectedRoundId, setSelectedRoundId] = useState<string>(rounds[0]?.id || "");
-  const [selectedDate, setSelectedDate] = useState<string>("2026-09-10");
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>("09:00 - 10:30");
-  const [selectedRoom, setSelectedRoom] = useState<string>("ห้องปฏิบัติการ 4731 (CE LAB)");
+  const [selectedRoundId, setSelectedRoundId] = useState<string>(initialRound?.id || "");
+  const [selectedDate, setSelectedDate] = useState<string>(
+    initialRound ? (initialRound.startDate > today ? initialRound.startDate : today) : today
+  );
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>(initialRound?.slotsPerDay[0] || "");
+  const [selectedRoom, setSelectedRoom] = useState<string>(initialRound?.availableRooms[0] || "");
   const [notes, setNotes] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [submitError, setSubmitError] = useState<string>("");
 
   if (!isOpen) return null;
 
-  const currentRound = rounds.find((r) => r.id === selectedRoundId) || rounds[0];
+  const currentRound = qeRounds.find((r) => r.id === selectedRoundId) || initialRound;
   const currentTrack = tracks.find((t) => t.id === selectedTrack) || tracks[0];
 
-  // Run Rule 1: Prerequisite Check
+  const handleRoundChange = (roundId: string) => {
+    setSelectedRoundId(roundId);
+    const r = qeRounds.find((x) => x.id === roundId);
+    if (r) {
+      setSelectedDate(r.startDate > today ? r.startDate : today);
+      setSelectedTimeSlot(r.slotsPerDay[0] || "");
+      setSelectedRoom(r.availableRooms[0] || "");
+    }
+  };
+
+  // Rule 1: academic prerequisite (status + 3-chapter proposal exam)
   const prerequisite = checkQEBookingPrerequisite(student, selectedTrack);
+
+  // Booking-window & capacity rules
+  const existingActive = dbStore
+    .getQEBookingsByStudent(student.id)
+    .find((b) => b.status !== "cancelled" && b.roundId === currentRound?.id);
+  const deadlinePassed = !!currentRound && today > currentRound.bookingDeadline;
+  const quotaFull = !!currentTrack && currentTrack.activeBookingsCount >= currentTrack.quotaTotal;
+  const dateOutOfRange =
+    !!currentRound && (selectedDate < currentRound.startDate || selectedDate > currentRound.endDate || selectedDate < today);
+
+  let blockReason = "";
+  if (!currentRound) blockReason = "ยังไม่มีรอบสอบ QE ที่เปิดรับจองในขณะนี้";
+  else if (!prerequisite.canBook) blockReason = prerequisite.reasonTh;
+  else if (existingActive) blockReason = `คุณมีคำร้องจองสอบในรอบนี้อยู่แล้ว (${existingActive.id}) ไม่สามารถจองซ้ำได้`;
+  else if (deadlinePassed) blockReason = `รอบสอบนี้ปิดรับจองแล้ว (หมดเขต ${currentRound.bookingDeadline})`;
+  else if (quotaFull) blockReason = `โควตาที่นั่งของแทร็ก ${currentTrack.code} เต็มแล้ว (${currentTrack.activeBookingsCount}/${currentTrack.quotaTotal})`;
+  const canBook = blockReason === "";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prerequisite.canBook) return;
+    setSubmitError("");
+    if (!canBook || !currentRound) return;
+    if (dateOutOfRange) {
+      setSubmitError(`กรุณาเลือกวันสอบระหว่าง ${currentRound.startDate} ถึง ${currentRound.endDate} (และไม่ย้อนหลัง)`);
+      return;
+    }
+    if (!selectedTimeSlot || !selectedRoom) {
+      setSubmitError("กรุณาเลือกช่วงเวลาและห้องสอบ");
+      return;
+    }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      const teachers = dbStore.getTeachers();
-      const defaultIds = currentTrack.examinersDefault || ["T-101", "T-104", "T-105"];
-      const t1 = teachers.find((t) => t.id === defaultIds[0]) || teachers[0];
-      const t2 = teachers.find((t) => t.id === defaultIds[1]) || teachers[1];
-      const t3 = teachers.find((t) => t.id === defaultIds[2]) || teachers[2];
-
-      const examiner1 = `${t1.prefixTh}${t1.firstNameTh} ${t1.lastNameTh}`;
-      const examiner2 = `${t2.prefixTh}${t2.firstNameTh} ${t2.lastNameTh}`;
-      const examiner3 = `${t3.prefixTh}${t3.firstNameTh} ${t3.lastNameTh}`;
-
-      const examinerIds: [string, string, string] = [t1.id, t2.id, t3.id];
-      const examinerNames: [string, string, string] = [examiner1, examiner2, examiner3];
+    try {
+      const teachers = dbStore.getTeachers().filter((t) => t.isCommittee);
+      const defaultIds = currentTrack.examinersDefault || [];
+      const picked = defaultIds
+        .map((id) => teachers.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t);
+      for (const t of teachers) {
+        if (picked.length >= 3) break;
+        if (!picked.includes(t)) picked.push(t);
+      }
+      if (picked.length < 3) {
+        setSubmitError("จำนวนกรรมการสอบในระบบไม่เพียงพอ (ต้องมีอย่างน้อย 3 ท่าน) กรุณาติดต่อผู้ดูแลระบบ");
+        return;
+      }
+      const [t1, t2, t3] = picked;
+      const name = (t: typeof t1) => `${t.prefixTh}${t.firstNameTh} ${t.lastNameTh}`;
 
       const newBooking = dbStore.createQEBooking({
         studentId: student.id,
         studentUid: student.uid,
         studentCode: student.studentCode,
-        studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`,
+        studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`.trim(),
         trackId: selectedTrack,
         roundId: currentRound.id,
         roundName: currentRound.titleTh,
@@ -81,17 +128,18 @@ export default function QEBookingModal({
         timeSlot: selectedTimeSlot,
         room: selectedRoom,
         status: "pending",
-        examinerIds,
-        examinerNames,
+        examinerIds: [t1.id, t2.id, t3.id],
+        examinerNames: [name(t1), name(t2), name(t3)],
         prerequisitePassed: true,
-        submissionDate: new Date().toISOString().split("T")[0],
+        submissionDate: today,
         notes,
       });
 
-      setIsSubmitting(false);
       onSuccess(newBooking);
       onClose();
-    }, 400);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -109,7 +157,7 @@ export default function QEBookingModal({
               </h3>
             </div>
             <p className="text-xs text-neutral-500 mt-0.5">
-              สาขาวิชาวิศวกรรมคอมพิวเตอร์ คณะเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยราชภัฏสวนสุนันทา
+              {DEPARTMENT_CE_TH} {FACULTY_NAME_TH} {UNIVERSITY_NAME_TH}
             </p>
           </div>
           <button
@@ -125,25 +173,30 @@ export default function QEBookingModal({
           {/* Prerequisite Alert Box */}
           <div
             className={`p-4 rounded-2xl border flex items-start space-x-3.5 ${
-              prerequisite.canBook
+              canBook
                 ? "bg-emerald-50/80 border-emerald-200 text-emerald-900"
                 : "bg-amber-50/90 border-amber-200 text-amber-900"
             }`}
           >
-            {prerequisite.canBook ? (
+            {canBook ? (
               <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
             ) : (
               <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             )}
             <div className="text-xs">
               <p className="font-bold">
-                {prerequisite.canBook
-                  ? "คุณสมบัติผ่านเกณฑ์ (Prerequisite Passed)"
-                  : "ไม่สามารถจองสอบได้ในขณะนี้ (Prerequisite Required)"}
+                {canBook ? "คุณสมบัติผ่านเกณฑ์ พร้อมจองสอบ (Eligible to Book)" : "ไม่สามารถจองสอบได้ในขณะนี้"}
               </p>
-              <p className="mt-0.5 opacity-90 leading-relaxed">{prerequisite.reasonTh}</p>
+              <p className="mt-0.5 opacity-90 leading-relaxed">{canBook ? prerequisite.reasonTh : blockReason}</p>
             </div>
           </div>
+
+          {submitError && (
+            <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
 
           {/* Student Info Summary */}
           <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-200/80 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
@@ -182,10 +235,10 @@ export default function QEBookingModal({
               </label>
               <select
                 value={selectedRoundId}
-                onChange={(e) => setSelectedRoundId(e.target.value)}
+                onChange={(e) => handleRoundChange(e.target.value)}
                 className="w-full text-xs font-medium bg-white border border-neutral-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20 focus:border-ssru-crimson"
               >
-                {rounds.map((r) => (
+                {qeRounds.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.titleTh} (หมดเขต: {r.bookingDeadline})
                   </option>
@@ -203,10 +256,15 @@ export default function QEBookingModal({
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                min="2026-09-01"
-                max="2026-09-30"
+                min={currentRound && currentRound.startDate > today ? currentRound.startDate : today}
+                max={currentRound?.endDate}
                 className="w-full text-xs font-medium bg-white border border-neutral-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20 focus:border-ssru-crimson"
               />
+              {currentRound && (
+                <p className="text-[10px] text-neutral-400 mt-1">
+                  ช่วงสอบ {currentRound.startDate} – {currentRound.endDate}
+                </p>
+              )}
             </div>
 
             {/* Time Slot */}
@@ -220,7 +278,7 @@ export default function QEBookingModal({
                 onChange={(e) => setSelectedTimeSlot(e.target.value)}
                 className="w-full text-xs font-medium bg-white border border-neutral-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20 focus:border-ssru-crimson"
               >
-                {currentRound.slotsPerDay.map((slot) => (
+                {(currentRound?.slotsPerDay || []).map((slot) => (
                   <option key={slot} value={slot}>
                     {slot} น.
                   </option>
@@ -239,7 +297,7 @@ export default function QEBookingModal({
                 onChange={(e) => setSelectedRoom(e.target.value)}
                 className="w-full text-xs font-medium bg-white border border-neutral-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20 focus:border-ssru-crimson"
               >
-                {currentRound.availableRooms.map((room) => (
+                {(currentRound?.availableRooms || []).map((room) => (
                   <option key={room} value={room}>
                     {room}
                   </option>
@@ -285,9 +343,9 @@ export default function QEBookingModal({
 
             <button
               type="submit"
-              disabled={!prerequisite.canBook || isSubmitting}
+              disabled={!canBook || isSubmitting}
               className={`px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold text-white shadow-md flex items-center space-x-2 transition-all ${
-                prerequisite.canBook
+                canBook
                   ? "bg-ssru-crimson hover:bg-ssru-600 active:scale-95 shadow-ssru-crimson/20"
                   : "bg-neutral-300 cursor-not-allowed text-neutral-500 shadow-none"
               }`}

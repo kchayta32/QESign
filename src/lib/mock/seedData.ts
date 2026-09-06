@@ -1,4 +1,4 @@
-import {
+import type {
   Track,
   Teacher,
   Student,
@@ -6,8 +6,27 @@ import {
   QEBooking,
   QEResult,
   AdvisorMeetingLog,
-  ConferenceEvidence
+  ConferenceEvidence,
+  TrackType
 } from "@/types";
+import {
+  DEPARTMENT_CE_SHORT_TH,
+  FACULTY_NAME_TH,
+  FACULTY_PHONE,
+  studentEmailFromCode,
+  yearLevelFromCode
+} from "@/lib/institution";
+
+/**
+ * Demo records (4 sample students with bookings / logs / results) are included by
+ * default so the workflow can be demonstrated. Set NEXT_PUBLIC_INCLUDE_DEMO_DATA=false
+ * to ship a clean roster-only seed.
+ */
+export const INCLUDE_DEMO_DATA = process.env.NEXT_PUBLIC_INCLUDE_DEMO_DATA !== "false";
+
+export const CURRENT_ACADEMIC_YEAR_BE = "2569";
+export const CURRENT_SEMESTER = 1;
+export const CURRENT_EVALUATION_ROUND = `${CURRENT_SEMESTER}/${CURRENT_ACADEMIC_YEAR_BE}`;
 
 export const MOCK_TRACKS: Track[] = [
   {
@@ -22,7 +41,7 @@ export const MOCK_TRACKS: Track[] = [
     badgeBorder: "border-amber-300",
     badgeText: "text-amber-700",
     quotaTotal: 15,
-    activeBookingsCount: 8,
+    activeBookingsCount: 0,
     examinersDefault: ["T-106", "T-102", "T-103"],
   },
   {
@@ -37,7 +56,7 @@ export const MOCK_TRACKS: Track[] = [
     badgeBorder: "border-blue-300",
     badgeText: "text-blue-700",
     quotaTotal: 25,
-    activeBookingsCount: 18,
+    activeBookingsCount: 0,
     examinersDefault: ["T-101", "T-104", "T-105"],
   },
   {
@@ -52,7 +71,7 @@ export const MOCK_TRACKS: Track[] = [
     badgeBorder: "border-emerald-300",
     badgeText: "text-emerald-700",
     quotaTotal: 12,
-    activeBookingsCount: 5,
+    activeBookingsCount: 0,
     examinersDefault: ["T-102", "T-103", "T-106"],
   },
   {
@@ -67,106 +86,204 @@ export const MOCK_TRACKS: Track[] = [
     badgeBorder: "border-purple-300",
     badgeText: "text-purple-700",
     quotaTotal: 15,
-    activeBookingsCount: 9,
+    activeBookingsCount: 0,
     examinersDefault: ["T-105", "T-101", "T-104"],
   },
 ];
 
-// Official 6 SSRU CE Faculty Members / Advisors
-export const MOCK_TEACHERS: Teacher[] = [
+// ---------------------------------------------------------------------------
+// Official faculty roster (8 lecturers). Login code = e-mail local part.
+// Default password = login code (must be changed by the lecturer after first login).
+// ---------------------------------------------------------------------------
+interface TeacherSeed {
+  id: string;
+  code: string;
+  prefixTh: string;
+  academicRankTh: string;
+  firstNameTh: string;
+  lastNameTh: string;
+  department: string;
+  website: string;
+  avatarUrl: string;
+  specializations: TrackType[];
+}
+
+const TEACHER_SEEDS: TeacherSeed[] = [
   {
     id: "T-101",
-    uid: "teacher_uid_101",
-    teacherCode: "T-101",
+    code: "kwanruan.ru",
     prefixTh: "ผศ.ดร.",
+    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
     firstNameTh: "ขวัญเรือน",
     lastNameTh: "รัศมี",
-    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
-    email: "kwanruen.ra@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 101",
+    department: "วิศวกรรมคอมพิวเตอร์",
+    website: "www.elfit.ssru.ac.th/kwanruan_ru",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20220721/75618b01bbee9849e28c726d13131fbd817879bf.png",
     specializations: ["SW", "DB"],
-    isCommittee: true,
-    currentAdviseesCount: 6,
-    avatarUrl: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
   },
   {
     id: "T-102",
-    uid: "teacher_uid_102",
-    teacherCode: "T-102",
+    code: "pornpawit.bo",
     prefixTh: "ผศ.ดร.",
+    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
     firstNameTh: "พรภวิษย์",
     lastNameTh: "บุญศรีเมือง",
-    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
-    email: "pornpawit.bo@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 102",
+    department: "วิศวกรรมคอมพิวเตอร์",
+    website: "www.elfit.ssru.ac.th/pornpawit_bo",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20181004/52ed9e29953fabe9a725cb755a69d71b37fac479.jpg",
     specializations: ["NW", "HW"],
-    isCommittee: true,
-    currentAdviseesCount: 7,
-    avatarUrl: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
   },
   {
     id: "T-103",
-    uid: "teacher_uid_103",
-    teacherCode: "T-103",
+    code: "ravi.ut",
     prefixTh: "ผศ.ดร.",
+    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
     firstNameTh: "รวิ",
     lastNameTh: "อุตตมธนินทร์",
-    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
-    email: "rawi.ut@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 103",
+    department: "วิศวกรรมคอมพิวเตอร์",
+    website: "www.elfit.ssru.ac.th/ravi_ut",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20181004/2bee86f84374f06b303c7825ec7022043e11b911.jpg",
     specializations: ["HW", "NW"],
-    isCommittee: true,
-    currentAdviseesCount: 5,
-    avatarUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
   },
   {
     id: "T-104",
-    uid: "teacher_uid_104",
-    teacherCode: "T-104",
+    code: "kant.ch",
     prefixTh: "อ.",
+    academicRankTh: "อาจารย์",
     firstNameTh: "กานต์",
     lastNameTh: "เจริญจิตร",
-    academicRankTh: "อาจารย์",
-    email: "karn.ch@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 104",
+    department: "วิศวกรรมคอมพิวเตอร์",
+    website: "www.elfit.ssru.ac.th/kant_ch",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20241105/de4d2e92aea651cafd09880d9089b6da3eb3dc0d.png",
     specializations: ["SW", "DB"],
-    isCommittee: true,
-    currentAdviseesCount: 5,
-    avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-  },
-  {
-    id: "T-105",
-    uid: "teacher_uid_105",
-    teacherCode: "T-105",
-    prefixTh: "อ.ดร.",
-    firstNameTh: "พงศ์ระพี",
-    lastNameTh: "แก้วไทรฮะ",
-    academicRankTh: "อาจารย์ ดร.",
-    email: "pongrapee.ka@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 105",
-    specializations: ["DB", "SW"],
-    isCommittee: true,
-    currentAdviseesCount: 8,
-    avatarUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
   },
   {
     id: "T-106",
-    uid: "teacher_uid_106",
-    teacherCode: "T-106",
+    code: "sethakarn.pr",
     prefixTh: "ผศ.ดร.",
+    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
     firstNameTh: "เศรษฐกาล",
     lastNameTh: "โปร่งนุช",
-    academicRankTh: "ผู้ช่วยศาสตราจารย์ ดร.",
-    email: "settakal.pr@ssru.ac.th",
-    phone: "02-160-1234 ต่อ 106",
+    department: "วิศวกรรมหุ่นยนต์",
+    website: "www.elfit.ssru.ac.th/sethakarn_pr",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20220721/63dc7cef130e6d484946015f18219a1c00e2ba68.png",
     specializations: ["HW", "NW"],
-    isCommittee: true,
-    currentAdviseesCount: 9,
-    avatarUrl: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80",
-  }
+  },
+  {
+    id: "T-107",
+    code: "taksaorn.ak",
+    prefixTh: "อ.",
+    academicRankTh: "อาจารย์",
+    firstNameTh: "ทักษอร",
+    lastNameTh: "อักษรศิลป์",
+    department: "วิศวกรรมหุ่นยนต์",
+    website: "www.elfit.ssru.ac.th/taksaorn_ak",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20251202/4955caa3e90350c8ec712fe4a9149fb699a85e3f.png",
+    specializations: ["HW"],
+  },
+  {
+    id: "T-108",
+    code: "parinwat.th",
+    prefixTh: "ผศ.",
+    academicRankTh: "ผู้ช่วยศาสตราจารย์",
+    firstNameTh: "ปริญวัฒน์",
+    lastNameTh: "ธนศิรเธียรชัย",
+    department: "การจัดการวิศวกรรม",
+    website: "www.elfit.ssru.ac.th/phuphat-ph",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20240613/c246cb837384991150f90d321b63e9f4e59b5378.png",
+    specializations: ["SW"],
+  },
+  {
+    id: "T-105",
+    code: "pongrapee.ka",
+    prefixTh: "ดร.",
+    academicRankTh: "ดร.",
+    firstNameTh: "พงศ์ระพี",
+    lastNameTh: "แก้วไทรฮะ",
+    department: "การจัดการวิศวกรรม",
+    website: "www.elfit.ssru.ac.th/pongrapee_ka",
+    avatarUrl: "https://eit.ssru.ac.th/useruploads/images/20240611/46cfe98dd67650c01a358a5befd779089f86c3fb.png",
+    specializations: ["DB", "SW"],
+  },
 ];
 
-export const MOCK_STUDENTS: Student[] = [
+export const MOCK_TEACHERS: Teacher[] = TEACHER_SEEDS.map((t) => ({
+  id: t.id,
+  uid: `pending_${t.code}`,
+  teacherCode: t.code,
+  prefixTh: t.prefixTh,
+  firstNameTh: t.firstNameTh,
+  lastNameTh: t.lastNameTh,
+  academicRankTh: t.academicRankTh,
+  email: `${t.code}@ssru.ac.th`,
+  phone: FACULTY_PHONE,
+  department: t.department,
+  faculty: FACULTY_NAME_TH,
+  website: t.website,
+  specializations: t.specializations,
+  isCommittee: true,
+  currentAdviseesCount: 0,
+  avatarUrl: t.avatarUrl,
+  profileCompleted: false,
+  passwordChanged: false,
+  authProvisioned: false,
+}));
+
+// ---------------------------------------------------------------------------
+// Student roster. Every code in these ranges gets a pre-registered account:
+// login = student code (or s<code>@ssru.ac.th), default password = student code.
+// ---------------------------------------------------------------------------
+export const STUDENT_CODE_RANGES: { prefix: string; from: number; to: number }[] = [
+  { prefix: "65122519", from: 1, to: 75 },
+  { prefix: "66122519", from: 1, to: 95 },
+  { prefix: "67122519", from: 1, to: 88 },
+  { prefix: "68122519", from: 1, to: 105 },
+  { prefix: "69122519", from: 1, to: 132 },
+];
+
+export function expandStudentCodes(ranges = STUDENT_CODE_RANGES): string[] {
+  const codes: string[] = [];
+  for (const r of ranges) {
+    for (let n = r.from; n <= r.to; n++) {
+      codes.push(`${r.prefix}${String(n).padStart(3, "0")}`);
+    }
+  }
+  return codes;
+}
+
+/** Minimal pre-registered record; the student completes the rest on first login. */
+export function createRosterStudent(studentCode: string): Student {
+  return {
+    id: `STD-${studentCode}`,
+    uid: `pending_${studentCode}`,
+    studentCode,
+    prefixTh: "",
+    firstNameTh: "นักศึกษา",
+    lastNameTh: studentCode,
+    prefixEn: "",
+    firstNameEn: "",
+    lastNameEn: "",
+    email: studentEmailFromCode(studentCode),
+    phone: "",
+    trackId: "SW",
+    yearLevel: yearLevelFromCode(studentCode),
+    status: "active",
+    advisorId: "",
+    projectTitleTh: "",
+    projectTitleEn: "",
+    passed3Chapter: false,
+    passedQE: false,
+    finalEligible: false,
+    avatarUrl: "",
+    profileCompleted: false,
+    passwordChanged: false,
+    authProvisioned: false,
+  };
+}
+
+export const ROSTER_STUDENTS: Student[] = expandStudentCodes().map(createRosterStudent);
+
+export const DEMO_STUDENTS: Student[] = [
   {
     id: "STD-01",
     uid: "student_uid_001",
@@ -190,6 +307,7 @@ export const MOCK_STUDENTS: Student[] = [
     passedQE: true,
     finalEligible: true,
     avatarUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80",
+    profileCompleted: true,
   },
   {
     id: "STD-02",
@@ -213,6 +331,7 @@ export const MOCK_STUDENTS: Student[] = [
     passedQE: true,
     finalEligible: false,
     avatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
+    profileCompleted: true,
   },
   {
     id: "STD-03",
@@ -236,6 +355,7 @@ export const MOCK_STUDENTS: Student[] = [
     passedQE: false,
     finalEligible: false,
     avatarUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80",
+    profileCompleted: true,
   },
   {
     id: "STD-04",
@@ -259,41 +379,48 @@ export const MOCK_STUDENTS: Student[] = [
     passedQE: false,
     finalEligible: false,
     avatarUrl: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
+    profileCompleted: true,
   }
 ];
 
+export const MOCK_STUDENTS: Student[] = INCLUDE_DEMO_DATA
+  ? [...DEMO_STUDENTS, ...ROSTER_STUDENTS]
+  : ROSTER_STUDENTS;
+
+export const QE_ROUND_TITLE = `การสอบวัดคุณสมบัติ (QE) ประจำภาคเรียนที่ ${CURRENT_EVALUATION_ROUND}`;
+
 export const MOCK_EXAM_ROUNDS: ExamRound[] = [
   {
-    id: "ROUND-QE-2567-1",
+    id: "ROUND-QE-2569-1",
     roundNumber: 1,
-    academicYear: "2567",
+    academicYear: CURRENT_ACADEMIC_YEAR_BE,
     semester: 1,
-    titleTh: "การสอบวัดคุณสมบัติ (QE) ประจำภาคเรียนที่ 1/2567",
+    titleTh: QE_ROUND_TITLE,
     type: "QE",
     startDate: "2026-09-01",
-    endDate: "2026-09-15",
-    bookingDeadline: "2026-08-30",
+    endDate: "2026-11-27",
+    bookingDeadline: "2026-11-20",
     isActive: true,
-    availableRooms: ["ห้องปฏิบัติการ 4731 (CE LAB)", "ห้องประชุมสาขาวิศวกรรมคอมพิวเตอร์ 4735", "ห้องสัมมนาคณะ 4220"],
+    availableRooms: ["ห้องปฏิบัติการ 4731 (CE LAB)", `ห้องประชุม${DEPARTMENT_CE_SHORT_TH} 4735`, "ห้องสัมมนาคณะ 4220"],
     slotsPerDay: ["09:00 - 10:30", "10:45 - 12:15", "13:30 - 15:00", "15:15 - 16:45"],
   },
   {
-    id: "ROUND-FINAL-2567-1",
+    id: "ROUND-FINAL-2569-1",
     roundNumber: 1,
-    academicYear: "2567",
+    academicYear: CURRENT_ACADEMIC_YEAR_BE,
     semester: 1,
-    titleTh: "การสอบป้องกันโครงงานฉบับสมบูรณ์ (Final Project Defense) ภาคเรียนที่ 1/2567",
+    titleTh: `การสอบป้องกันโครงงานฉบับสมบูรณ์ (Final Project Defense) ภาคเรียนที่ ${CURRENT_EVALUATION_ROUND}`,
     type: "FINAL_DEFENSE",
-    startDate: "2026-10-10",
-    endDate: "2026-10-25",
-    bookingDeadline: "2026-10-05",
+    startDate: "2026-11-16",
+    endDate: "2026-12-18",
+    bookingDeadline: "2026-12-11",
     isActive: true,
     availableRooms: ["ห้องสัมมนาคณะ 4220", "ห้อง 4735"],
     slotsPerDay: ["09:00 - 10:30", "10:45 - 12:15", "13:30 - 15:00"],
   }
 ];
 
-export const MOCK_QE_BOOKINGS: QEBooking[] = [
+export const DEMO_QE_BOOKINGS: QEBooking[] = [
   {
     id: "BK-QE-001",
     studentId: "STD-01",
@@ -301,14 +428,14 @@ export const MOCK_QE_BOOKINGS: QEBooking[] = [
     studentCode: "64122010023",
     studentNameTh: "นายธนากร สุขเจริญ",
     trackId: "SW",
-    roundId: "ROUND-QE-2567-1",
-    roundName: "การสอบวัดคุณสมบัติ (QE) ประจำภาคเรียนที่ 1/2567",
+    roundId: "ROUND-QE-2569-1",
+    roundName: QE_ROUND_TITLE,
     examDate: "2026-09-05",
     timeSlot: "09:00 - 10:30",
     room: "ห้องปฏิบัติการ 4731 (CE LAB)",
     status: "evaluated",
     examinerIds: ["T-101", "T-104", "T-105"],
-    examinerNames: ["ผศ.ดร.ขวัญเรือน รัศมี", "อ.กานต์ เจริญจิตร", "อ.ดร.พงศ์ระพี แก้วไทรฮะ"],
+    examinerNames: ["ผศ.ดร.ขวัญเรือน รัศมี", "อ.กานต์ เจริญจิตร", "ดร.พงศ์ระพี แก้วไทรฮะ"],
     prerequisitePassed: true,
     submissionDate: "2026-08-20",
     notes: "เตรียมสไลด์นำเสนอและ Demo ระบบสถาปัตยกรรม Microservices",
@@ -320,8 +447,8 @@ export const MOCK_QE_BOOKINGS: QEBooking[] = [
     studentCode: "64122010045",
     studentNameTh: "นางสาวกานดา รัตนกุล",
     trackId: "HW",
-    roundId: "ROUND-QE-2567-1",
-    roundName: "การสอบวัดคุณสมบัติ (QE) ประจำภาคเรียนที่ 1/2567",
+    roundId: "ROUND-QE-2569-1",
+    roundName: QE_ROUND_TITLE,
     examDate: "2026-09-06",
     timeSlot: "10:45 - 12:15",
     room: "ห้องปฏิบัติการ 4731 (CE LAB)",
@@ -339,8 +466,8 @@ export const MOCK_QE_BOOKINGS: QEBooking[] = [
     studentCode: "64122010088",
     studentNameTh: "นายปิติพัฒน์ แสนดี",
     trackId: "NW",
-    roundId: "ROUND-QE-2567-1",
-    roundName: "การสอบวัดคุณสมบัติ (QE) ประจำภาคเรียนที่ 1/2567",
+    roundId: "ROUND-QE-2569-1",
+    roundName: QE_ROUND_TITLE,
     examDate: "2026-09-08",
     timeSlot: "13:30 - 15:00",
     room: "ห้องประชุม 4735",
@@ -353,7 +480,7 @@ export const MOCK_QE_BOOKINGS: QEBooking[] = [
   }
 ];
 
-export const MOCK_QE_RESULTS: QEResult[] = [
+export const DEMO_QE_RESULTS: QEResult[] = [
   {
     id: "RES-QE-001",
     bookingId: "BK-QE-001",
@@ -361,7 +488,7 @@ export const MOCK_QE_RESULTS: QEResult[] = [
     studentCode: "64122010023",
     studentNameTh: "นายธนากร สุขเจริญ",
     trackId: "SW",
-    evaluationRound: "1/2567",
+    evaluationRound: CURRENT_EVALUATION_ROUND,
     examinerScores: [
       {
         examinerId: "T-101",
@@ -383,7 +510,7 @@ export const MOCK_QE_RESULTS: QEResult[] = [
       },
       {
         examinerId: "T-105",
-        examinerName: "อ.ดร.พงศ์ระพี แก้วไทรฮะ (กรรมการ)",
+        examinerName: "ดร.พงศ์ระพี แก้วไทรฮะ (กรรมการ)",
         score: 85,
         isPass: true,
         comments: "การจัดการฐานข้อมูล NoSQL และ Caching ทำได้มีประสิทธิภาพ",
@@ -405,7 +532,7 @@ export const MOCK_QE_RESULTS: QEResult[] = [
     studentCode: "64122010045",
     studentNameTh: "นางสาวกานดา รัตนกุล",
     trackId: "HW",
-    evaluationRound: "1/2567",
+    evaluationRound: CURRENT_EVALUATION_ROUND,
     examinerScores: [
       {
         examinerId: "T-106",
@@ -444,7 +571,7 @@ export const MOCK_QE_RESULTS: QEResult[] = [
   }
 ];
 
-export const MOCK_ADVISOR_LOGS: AdvisorMeetingLog[] = [
+export const DEMO_ADVISOR_LOGS: AdvisorMeetingLog[] = [
   // STD-01
   {
     id: "LOG-001",
@@ -659,7 +786,7 @@ export const MOCK_ADVISOR_LOGS: AdvisorMeetingLog[] = [
   }
 ];
 
-export const MOCK_CONFERENCE_EVIDENCE: ConferenceEvidence[] = [
+export const DEMO_CONFERENCE_EVIDENCE: ConferenceEvidence[] = [
   {
     id: "CONF-001",
     studentId: "STD-01",
@@ -704,3 +831,9 @@ export const MOCK_CONFERENCE_EVIDENCE: ConferenceEvidence[] = [
     submissionDate: "2026-08-24",
   }
 ];
+
+// Demo transactional data (only when INCLUDE_DEMO_DATA)
+export const MOCK_QE_BOOKINGS: QEBooking[] = INCLUDE_DEMO_DATA ? DEMO_QE_BOOKINGS : [];
+export const MOCK_QE_RESULTS: QEResult[] = INCLUDE_DEMO_DATA ? DEMO_QE_RESULTS : [];
+export const MOCK_ADVISOR_LOGS: AdvisorMeetingLog[] = INCLUDE_DEMO_DATA ? DEMO_ADVISOR_LOGS : [];
+export const MOCK_CONFERENCE_EVIDENCE: ConferenceEvidence[] = INCLUDE_DEMO_DATA ? DEMO_CONFERENCE_EVIDENCE : [];

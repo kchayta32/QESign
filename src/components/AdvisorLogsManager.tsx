@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AdvisorMeetingLog, Student, Teacher, UserRole } from "@/types";
 import { dbStore } from "@/lib/firebase/db";
 import { formatThaiDate } from "@/lib/utils";
@@ -46,6 +46,14 @@ export default function AdvisorLogsManager({
   const [discussionSummary, setDiscussionSummary] = useState<string>("");
   const [progressPercentage, setProgressPercentage] = useState<number>(50);
   const [nextGoals, setNextGoals] = useState<string>("");
+  const [formError, setFormError] = useState<string>("");
+
+  // Keep the list in sync with the data store (cloud updates from the advisor, etc.).
+  useEffect(() => {
+    const refresh = () => setLogs(dbStore.getAdvisorLogs(student.id));
+    refresh();
+    return dbStore.subscribe(refresh);
+  }, [student.id]);
 
   if (!isOpen) return null;
 
@@ -55,25 +63,30 @@ export default function AdvisorLogsManager({
 
   const handleCreateLog = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!topic || !discussionSummary) return;
-
-    const teachers = dbStore.getTeachers();
-    const advisor = teachers.find((t) => t.id === student.advisorId) || teachers[0];
+    setFormError("");
+    if (!topic.trim() || !discussionSummary.trim()) {
+      setFormError("กรุณากรอกหัวข้อและสรุปรายละเอียดการเข้าพบ");
+      return;
+    }
+    if (!student.advisorId) {
+      setFormError("ยังไม่ได้ระบุอาจารย์ที่ปรึกษาในโปรไฟล์ กรุณาแก้ไขโปรไฟล์ก่อนบันทึกการเข้าพบ");
+      return;
+    }
 
     dbStore.addAdvisorLog({
       studentId: student.id,
       studentUid: student.uid,
       studentCode: student.studentCode,
-      studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`,
+      studentNameTh: `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`.trim(),
       projectTitle: student.projectTitleTh || "โครงงานวิศวกรรมคอมพิวเตอร์",
       meetingDate,
       meetingType,
-      topic,
-      discussionSummary,
+      topic: topic.trim(),
+      discussionSummary: discussionSummary.trim(),
       progressPercentage,
-      nextGoals,
-      advisorId: advisor.id,
-      advisorNameTh: `${advisor.prefixTh} ${advisor.firstNameTh} ${advisor.lastNameTh}`,
+      nextGoals: nextGoals.trim(),
+      advisorId: student.advisorId,
+      advisorNameTh: dbStore.getTeacherDisplayName(student.advisorId),
       status: "pending",
     });
 
@@ -170,6 +183,9 @@ export default function AdvisorLogsManager({
               onSubmit={handleCreateLog}
               className="p-5 rounded-2xl bg-ssru-50/50 border border-ssru-crimson/30 space-y-4"
             >
+              {formError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs">{formError}</div>
+              )}
               <div className="flex items-center justify-between pb-2 border-b border-ssru-crimson/20">
                 <h4 className="text-xs md:text-sm font-bold text-ssru-crimson flex items-center gap-2">
                   <Plus className="w-4 h-4" />
