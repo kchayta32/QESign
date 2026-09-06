@@ -13,7 +13,9 @@
     "test:password": "node -r ./scripts/register-ts.js scripts/test-password.js",
     "test:auth": "node -r ./scripts/register-ts.js scripts/test-auth.js",
     "seed:firebase": "node -r ./scripts/register-ts.js scripts/seed-firebase.js",
-    "probe:firebase": "node scripts/probe-firebase.js"
+    "probe:firebase": "node scripts/probe-firebase.js",
+    "smoke:ssr": "node scripts/smoke-ssr.js",
+    "verify:live": "node scripts/verify-live.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",
