@@ -1,0 +1,14 @@
+{
+  "rules": {
+    "ssru_ce": {
+      ".read": true,
+      ".write": true,
+      "students": { ".indexOn": ["studentCode", "email", "advisorId"] },
+      "teachers": { ".indexOn": ["teacherCode", "email"] },
+      "qeBookings": { ".indexOn": ["studentId", "roundId", "trackId", "status"] },
+      "qeResults": { ".indexOn": ["studentId", "bookingId"] },
+      "advisorLogs": { ".indexOn": ["studentId", "advisorId", "status"] },
+      "conferenceEvidence": { ".indexOn": ["studentId", "status"] }
+    }
+  }
+}
