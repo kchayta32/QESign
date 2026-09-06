@@ -199,6 +199,31 @@ class AppDataStore {
     return !!this.cloudSynced[name];
   }
 
+  /**
+   * Resolve once every listed collection has received its first cloud snapshot (or
+   * immediately when the cloud is intentionally disabled, e.g. in local test runs).
+   * Resolves `false` on timeout so callers can refuse security-sensitive operations
+   * that must not run against seed/cached data alone.
+   */
+  public waitForCloudSync(names: CollectionName[], timeoutMs: number = 8000): Promise<boolean> {
+    if (isCloudDisabled() || typeof window === "undefined") return Promise.resolve(true);
+    if (names.every((n) => this.cloudSynced[n])) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(ok);
+      };
+      const unsubscribe = this.subscribe(() => {
+        if (names.every((n) => this.cloudSynced[n])) finish(true);
+      });
+      const timer = setTimeout(() => finish(false), timeoutMs);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Local cache
   // ---------------------------------------------------------------------------

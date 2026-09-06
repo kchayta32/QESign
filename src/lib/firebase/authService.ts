@@ -159,6 +159,16 @@ async function syncFirebaseAuth(account: ResolvedAccount, password: string): Pro
  */
 export async function loginAccount(identifier: string, password: string): Promise<LoginResult> {
   try {
+    // Credentials live in the cloud records; never verify against seed/cached data alone
+    // (otherwise a changed password could be bypassed with the default code on a fresh device).
+    const synced = await dbStore.waitForCloudSync(["students", "teachers", "admins"]);
+    if (!synced) {
+      return {
+        success: false,
+        error: "ไม่สามารถเชื่อมต่อฐานข้อมูล Firebase ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตแล้วลองใหม่อีกครั้ง",
+      };
+    }
+
     const account = resolveAccount(identifier);
     if (!account) return { success: false, error: GENERIC_LOGIN_ERROR };
 
@@ -197,6 +207,11 @@ export async function changeAccountPassword(
   currentPassword: string,
   newPassword: string
 ): Promise<{ success: boolean; error?: string }> {
+  const synced = await dbStore.waitForCloudSync(["students", "teachers", "admins"]);
+  if (!synced) {
+    return { success: false, error: "ไม่สามารถเชื่อมต่อฐานข้อมูล Firebase ได้ กรุณาลองใหม่อีกครั้ง" };
+  }
+
   const entity =
     kind === "student"
       ? dbStore.getStudentById(entityId)
