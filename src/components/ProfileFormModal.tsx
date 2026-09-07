@@ -126,7 +126,7 @@ function AvatarPicker({
           <span>{busy ? "กำลังประมวลผลรูป..." : "อัปโหลดรูปโปรไฟล์"}</span>
           <input type="file" accept="image/*" onChange={handleFile} className="hidden" disabled={busy} />
         </label>
-        <p className="text-[10px] text-neutral-400">รองรับ JPG, PNG, WEBP (ระบบจะย่อรูปเป็น 256×256 อัตโนมัติ)</p>
+        <p className="text-[10px] text-neutral-400">รองรับ JPG, PNG, WEBP (ระบบจะย่อรูปเป็น 192×192 อัตโนมัติ)</p>
         {value && (
           <button type="button" onClick={() => onChange("")} className="text-[10px] text-red-600 hover:underline">
             ใช้รูปตัวอักษรย่อแทน
@@ -289,6 +289,8 @@ function StudentProfileForm({
         return;
       }
       onClose();
+    } catch (error: any) {
+      setError(error?.message || "บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setSaving(false);
     }
@@ -492,6 +494,8 @@ function TeacherProfileForm({
         return;
       }
       onClose();
+    } catch (error: any) {
+      setError(error?.message || "บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่");
     } finally {
       setSaving(false);
     }

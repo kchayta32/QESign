@@ -9,28 +9,23 @@ import TrackSelector from "./TrackSelector";
 import QEBookingModal from "./QEBookingModal";
 import AdvisorLogsManager from "./AdvisorLogsManager";
 import ConferenceEvidenceManager from "./ConferenceEvidenceManager";
+import ProjectDocumentsManager from "./ProjectDocumentsManager";
 import FinalCertificateModal from "./FinalCertificateModal";
 import {
-  GraduationCap,
   Calendar,
-  Clock,
-  MapPin,
   Users,
   CheckCircle2,
-  AlertCircle,
   FileText,
   Plus,
   Award,
-  Sparkles,
   BookOpen,
-  Send,
-  Building2,
   ChevronRight,
-  Radio
+  FolderOpen
 } from "lucide-react";
-import { QEBooking } from "@/types";
+import { QEBooking, ProjectDocumentType } from "@/types";
 import Avatar from "./Avatar";
 import { DEPARTMENT_CE_TH } from "@/lib/institution";
+import { PROJECT_DOCUMENT_STAGES, getLatestDocument, hasPassed3ChapterExam } from "@/lib/rules/engine";
 
 export default function StudentDashboard() {
   const { currentStudent } = useAuth();
@@ -39,6 +34,8 @@ export default function StudentDashboard() {
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
   const [isConferenceModalOpen, setIsConferenceModalOpen] = useState(false);
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
+  const [documentsFocus, setDocumentsFocus] = useState<ProjectDocumentType | null>(null);
+  const [isDocumentsModalOpen, setIsDocumentsModalOpen] = useState(false);
 
   if (!currentStudent) {
     return (
@@ -57,6 +54,24 @@ export default function StudentDashboard() {
   const latestBooking = studentBookings[0];
   const qeResult = latestBooking ? dbStore.getQEResultByBooking(latestBooking.id) : undefined;
   const advisorDisplayName = dbStore.getTeacherDisplayName(currentStudent.advisorId);
+  const documents = dbStore.getProjectDocuments(currentStudent.id);
+  const passed3Chapter = hasPassed3ChapterExam(currentStudent, documents);
+  const chapter3Doc = getLatestDocument(documents, "chapter3");
+  const pendingDocs = documents.filter((d) => d.status === "submitted").length;
+  const approvedStages = PROJECT_DOCUMENT_STAGES.filter((s) => documents.some((d) => d.docType === s.type && d.status === "approved")).length;
+
+  const chapter3StatusText = passed3Chapter
+    ? "ผ่านแล้ว (พร้อมสอบ QE)"
+    : chapter3Doc?.status === "submitted"
+    ? "ส่งเอกสารแล้ว — รออาจารย์บันทึกผล"
+    : chapter3Doc?.status === "rejected"
+    ? "ไม่ผ่าน — ส่งเอกสารฉบับแก้ไข"
+    : "ยังไม่ส่งเอกสารสอบ 3 บท";
+
+  const openDocuments = (focus: ProjectDocumentType | null = null) => {
+    setDocumentsFocus(focus);
+    setIsDocumentsModalOpen(true);
+  };
 
   const handleBookingSuccess = (_booking: QEBooking) => {
     // State is synced via the data store subscription & Realtime Database.
@@ -126,11 +141,16 @@ export default function StudentDashboard() {
 
           <div className="flex items-center space-x-2">
             <span className="text-neutral-400">สถานะสอบ 3 บท:</span>
-            <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-              currentStudent.passed3Chapter ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
-            }`}>
-              {currentStudent.passed3Chapter ? "ผ่านแล้ว (พร้อมสอบ QE)" : "รออาจารย์ที่ปรึกษายืนยันผลสอบ 3 บท"}
-            </span>
+            <button
+              type="button"
+              onClick={() => openDocuments("chapter3")}
+              title="เปิดเมนูเอกสารโครงงาน"
+              className={`px-2 py-0.5 rounded text-[11px] font-bold hover:underline ${
+                passed3Chapter ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {chapter3StatusText}
+            </button>
           </div>
         </div>
       </div>
@@ -283,6 +303,26 @@ export default function StudentDashboard() {
               เมนูลัดการจัดการโครงงาน
             </h3>
 
+            {/* Button 0: Project documents (Proposal / 3 บท / 5 บท) */}
+            <button
+              onClick={() => openDocuments(null)}
+              className="w-full p-4 rounded-2xl bg-neutral-50 hover:bg-red-50/50 border border-neutral-200/80 hover:border-ssru-crimson/30 transition-all text-left flex items-center justify-between group"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center">
+                  <FolderOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-neutral-charcoal">เอกสารโครงงาน (PDF)</h4>
+                  <span className="text-[11px] text-neutral-500">
+                    Proposal • สอบ 3 บท • สอบ 5 บท — ผ่านแล้ว {approvedStages}/3
+                    {pendingDocs > 0 ? ` • รอตรวจ ${pendingDocs}` : ""}
+                  </span>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-neutral-400 group-hover:text-ssru-crimson group-hover:translate-x-0.5 transition-all" />
+            </button>
+
             {/* Button 1: Advisor Logs */}
             <button
               onClick={() => setIsLogsModalOpen(true)}
@@ -346,13 +386,28 @@ export default function StudentDashboard() {
       </div>
 
       {/* Modals */}
-      <QEBookingModal
+      {/* Mounted only while open so every booking attempt starts from the student's current track / round. */}
+      {isBookingModalOpen && (
+        <QEBookingModal
+          student={currentStudent}
+          tracks={tracks}
+          rounds={examRounds}
+          isOpen={isBookingModalOpen}
+          onClose={() => setIsBookingModalOpen(false)}
+          onSuccess={handleBookingSuccess}
+          onOpenDocuments={() => {
+            setIsBookingModalOpen(false);
+            openDocuments("chapter3");
+          }}
+        />
+      )}
+
+      <ProjectDocumentsManager
         student={currentStudent}
-        tracks={tracks}
-        rounds={examRounds}
-        isOpen={isBookingModalOpen}
-        onClose={() => setIsBookingModalOpen(false)}
-        onSuccess={handleBookingSuccess}
+        role="student"
+        isOpen={isDocumentsModalOpen}
+        focusType={documentsFocus || undefined}
+        onClose={() => setIsDocumentsModalOpen(false)}
       />
 
       <AdvisorLogsManager

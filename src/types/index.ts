@@ -49,7 +49,8 @@ export interface Student extends AccountSecurity {
   coAdvisorId?: string;
   projectTitleTh?: string;
   projectTitleEn?: string;
-  passed3Chapter: boolean; // Proposal Exam 3-Chapter Passed (QE Prerequisite)
+  passed3Chapter: boolean; // 3-chapter exam passed — set when the advisor approves the chapter3 document (QE prerequisite)
+  passed5Chapter?: boolean; // 5-chapter (final book) exam passed — set when the advisor approves the chapter5 document
   passedQE: boolean;
   finalEligible: boolean;
   avatarUrl?: string;
@@ -189,6 +190,40 @@ export interface ConferenceEvidence {
   reviewedByAdvisorName?: string;
   verifiedAt?: string;
   submissionDate: string;
+}
+
+/**
+ * Project document pipeline (PDF submissions reviewed by the advisor):
+ *   proposal  → โครงร่างโครงงาน (Proposal)
+ *   chapter3  → เอกสารสอบ 3 บท (prerequisite for QE booking)
+ *   chapter5  → เอกสารสอบ 5 บท (final book)
+ */
+export type ProjectDocumentType = 'proposal' | 'chapter3' | 'chapter5';
+
+/** submitted = waiting for the advisor; approved = exam passed; rejected = failed / needs a new version. */
+export type ProjectDocumentStatus = 'submitted' | 'approved' | 'rejected';
+
+export interface ProjectDocument {
+  id: string;
+  studentId: string;
+  studentUid: string;
+  studentCode: string;
+  studentNameTh: string;
+  projectTitle: string;
+  docType: ProjectDocumentType;
+  version: number; // 1, 2, … per docType (every resubmission is a new version)
+  fileName: string; // original file name (*.pdf)
+  fileSize: number; // bytes
+  fileRef: string; // pdf://<docId> (Realtime Database node) or an https download URL
+  studentNote?: string;
+  status: ProjectDocumentStatus;
+  advisorId: string;
+  advisorNameTh: string;
+  reviewerId?: string;
+  reviewerName?: string;
+  reviewFeedback?: string;
+  reviewedAt?: string;
+  submittedAt: string; // ISO timestamp
 }
 
 export interface FinalExamEligibility {

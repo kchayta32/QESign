@@ -8,7 +8,16 @@
       "qeBookings": { ".indexOn": ["studentId", "roundId", "trackId", "status"] },
       "qeResults": { ".indexOn": ["studentId", "bookingId"] },
       "advisorLogs": { ".indexOn": ["studentId", "advisorId", "status"] },
-      "conferenceEvidence": { ".indexOn": ["studentId", "status"] }
+      "conferenceEvidence": { ".indexOn": ["studentId", "status"] },
+      "projectDocuments": { ".indexOn": ["studentId", "advisorId", "docType", "status"] },
+      "documentFiles": {
+        "$docId": { ".validate": "newData.isString() && newData.val().length <= 7500000" }
+      },
+      "avatars": {
+        "$kind": {
+          "$id": { ".validate": "newData.isString() && newData.val().length <= 300000" }
+        }
+      }
     }
   }
 }

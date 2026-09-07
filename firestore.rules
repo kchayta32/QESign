@@ -86,6 +86,14 @@ service cloud.firestore {
       allow delete: if isTeacher() || isAdmin();
     }
 
+    // Project Documents (เอกสารโครงงาน: Proposal / สอบ 3 บท / สอบ 5 บท — metadata only, PDF stored out-of-band)
+    match /project_documents/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isTeacher() || (isSignedIn() && request.auth.uid == resource.data.studentUid);
+      allow delete: if isTeacher() || (isSignedIn() && request.auth.uid == resource.data.studentUid);
+    }
+
     // Final Exam Eligibility
     match /final_exam_eligibility/{eligibilityId} {
       allow read: if isSignedIn();

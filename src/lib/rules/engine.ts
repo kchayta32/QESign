@@ -6,6 +6,8 @@ import {
   AdvisorMeetingLog,
   ConferenceEvidence,
   FinalExamEligibility,
+  ProjectDocument,
+  ProjectDocumentType,
   TrackType
 } from "@/types";
 
@@ -13,11 +15,113 @@ export const QE_PASSING_SCORE_DEFAULT = 60;
 export const ADVISOR_MIN_REQUIRED_LOGS = 6;
 export const COMMITTEE_REQUIRED_VOTES = 2; // 2 out of 3 examiners
 
+// ---------------------------------------------------------------------------
+// 0. Project document pipeline (Proposal → สอบ 3 บท → สอบ 5 บท)
+// ---------------------------------------------------------------------------
+export interface ProjectDocumentStage {
+  type: ProjectDocumentType;
+  order: number;
+  titleTh: string;
+  shortTh: string;
+  descriptionTh: string;
+  /** Stage that must be approved before this one can be submitted. */
+  requires?: ProjectDocumentType;
+}
+
+export const PROJECT_DOCUMENT_STAGES: ProjectDocumentStage[] = [
+  {
+    type: "proposal",
+    order: 1,
+    titleTh: "โครงร่างโครงงาน (Proposal)",
+    shortTh: "Proposal",
+    descriptionTh: "เอกสารเสนอหัวข้อและโครงร่างโครงงาน (.pdf) เพื่อขออนุมัติจากอาจารย์ที่ปรึกษา",
+  },
+  {
+    type: "chapter3",
+    order: 2,
+    titleTh: "เอกสารสอบ 3 บท (Proposal Defense)",
+    shortTh: "สอบ 3 บท",
+    descriptionTh: "รายงานบทที่ 1–3 ฉบับสอบ (.pdf) — ต้องได้รับผล \"ผ่าน\" ก่อนจึงจะจองสอบ QE ได้",
+    requires: "proposal",
+  },
+  {
+    type: "chapter5",
+    order: 3,
+    titleTh: "เอกสารสอบ 5 บท (Final Book)",
+    shortTh: "สอบ 5 บท",
+    descriptionTh: "รายงานฉบับสมบูรณ์บทที่ 1–5 (.pdf) สำหรับการสอบป้องกันโครงงาน",
+    requires: "chapter3",
+  },
+];
+
+export function getDocumentStage(type: ProjectDocumentType): ProjectDocumentStage {
+  return PROJECT_DOCUMENT_STAGES.find((s) => s.type === type) || PROJECT_DOCUMENT_STAGES[0];
+}
+
+/** Newest submission of one stage (highest version, then latest submittedAt). */
+export function getLatestDocument(documents: ProjectDocument[], type: ProjectDocumentType): ProjectDocument | undefined {
+  return (documents || [])
+    .filter((d) => d.docType === type)
+    .sort((a, b) => (b.version || 0) - (a.version || 0) || (b.submittedAt || "").localeCompare(a.submittedAt || ""))[0];
+}
+
+/** A stage counts as passed when any version of its document has been approved. */
+export function isDocumentStageApproved(documents: ProjectDocument[], type: ProjectDocumentType): boolean {
+  return (documents || []).some((d) => d.docType === type && d.status === "approved");
+}
+
+/**
+ * The 3-chapter exam is passed when the advisor approved the chapter3 document. The
+ * `passed3Chapter` flag on the student record is kept in step with that approval (and is
+ * still honoured for records that were flagged before the document pipeline existed).
+ */
+export function hasPassed3ChapterExam(student: Pick<Student, "passed3Chapter">, documents?: ProjectDocument[]): boolean {
+  // Once documents exist they are authoritative, even if a legacy/cache flag is stale.
+  if (documents?.some((d) => d.docType === "chapter3")) return isDocumentStageApproved(documents, "chapter3");
+  return !!student.passed3Chapter;
+}
+
+/** Can the student upload (a new version of) this document right now? */
+export function checkDocumentSubmissionPrerequisite(
+  student: Pick<Student, "status" | "passed3Chapter">,
+  documents: ProjectDocument[],
+  type: ProjectDocumentType
+): { canSubmit: boolean; reasonTh: string } {
+  if (student.status !== "active") {
+    return { canSubmit: false, reasonTh: "สถานะนักศึกษาไม่พร้อมสำหรับการส่งเอกสาร (ต้องอยู่ในสถานะปกติ)" };
+  }
+  const stage = getDocumentStage(type);
+  const latest = getLatestDocument(documents, type);
+  if (latest?.status === "approved") {
+    return { canSubmit: false, reasonTh: `${stage.shortTh} ได้รับผล "ผ่าน" แล้ว ไม่ต้องส่งเอกสารซ้ำ` };
+  }
+  if (latest?.status === "submitted") {
+    return { canSubmit: false, reasonTh: `เอกสาร ${stage.shortTh} (ฉบับที่ ${latest.version}) อยู่ระหว่างรออาจารย์ที่ปรึกษาตรวจ` };
+  }
+  if (stage.requires) {
+    const prev = getDocumentStage(stage.requires);
+    const prevPassed =
+      stage.requires === "chapter3" ? hasPassed3ChapterExam(student, documents) : isDocumentStageApproved(documents, stage.requires);
+    if (!prevPassed) {
+      return { canSubmit: false, reasonTh: `ต้องผ่านขั้นตอน ${prev.shortTh} ก่อนจึงจะส่งเอกสาร ${stage.shortTh} ได้` };
+    }
+  }
+  return {
+    canSubmit: true,
+    reasonTh: latest?.status === "rejected" ? `ส่งเอกสาร ${stage.shortTh} ฉบับแก้ไข (ฉบับที่ ${latest.version + 1})` : `พร้อมส่งเอกสาร ${stage.shortTh}`,
+  };
+}
+
 /**
  * 1. Check QE Booking Prerequisites
- * Example: Software Engineering & others require passed proposal (3 chapters)
+ * The student must be active and must have passed the 3-chapter exam (advisor approved the
+ * chapter3 document) before a QE round can be booked.
  */
-export function checkQEBookingPrerequisite(student: Student, trackId: TrackType): {
+export function checkQEBookingPrerequisite(
+  student: Student,
+  trackId: TrackType,
+  documents?: ProjectDocument[]
+): {
   canBook: boolean;
   reasonTh: string;
 } {
@@ -28,17 +132,24 @@ export function checkQEBookingPrerequisite(student: Student, trackId: TrackType)
     };
   }
 
-  // Rule: Must have passed 3-chapter proposal exam before booking QE
-  if (!student.passed3Chapter) {
+  // Rule: Must have passed the 3-chapter exam before booking QE
+  if (!hasPassed3ChapterExam(student, documents)) {
+    const latest = documents ? getLatestDocument(documents, "chapter3") : undefined;
+    const hint =
+      latest?.status === "submitted"
+        ? "เอกสารสอบ 3 บทอยู่ระหว่างรออาจารย์ที่ปรึกษาบันทึกผล"
+        : latest?.status === "rejected"
+        ? "ผลสอบ 3 บทล่าสุด \"ไม่ผ่าน\" กรุณาส่งเอกสารฉบับแก้ไข"
+        : "กรุณาส่งเอกสารสอบ 3 บท (.pdf) ในเมนูเอกสารโครงงานและรอผล \"ผ่าน\" จากอาจารย์ที่ปรึกษา";
     return {
       canBook: false,
-      reasonTh: "ยังไม่ผ่านการสอบหัวข้อและเค้าโครงโครงงาน 3 บท (Prerequisite Required)",
+      reasonTh: `ยังไม่ผ่านการสอบ 3 บท จึงยังไม่สามารถจองสอบ QE ได้ — ${hint}`,
     };
   }
 
   return {
     canBook: true,
-    reasonTh: "มีคุณสมบัติครบถ้วน พร้อมลงทะเบียนจองสอบวัดคุณสมบัติ (QE)",
+    reasonTh: "มีคุณสมบัติครบถ้วน (ผ่านการสอบ 3 บทแล้ว) พร้อมลงทะเบียนจองสอบวัดคุณสมบัติ (QE)",
   };
 }
 

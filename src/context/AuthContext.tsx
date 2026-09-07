@@ -21,6 +21,8 @@ interface AuthContextType {
   needsProfileSetup: boolean;
   allStudents: Student[];
   allTeachers: Teacher[];
+  /** Increments on every data-store change (cloud snapshot or local mutation) — use as a memo dependency. */
+  dataVersion: number;
   login: (identifier: string, password: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   logout: () => Promise<void>;
   completeStudentProfile: (updates: Partial<Student>, newPassword?: string) => Promise<{ success: boolean; error?: string }>;
@@ -56,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<StoredSession | null>(null);
   // Bumped on every store change so derived "current*" values re-resolve.
   const [storeVersion, setStoreVersion] = useState(0);
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
     setStudents(dbStore.getStudents());
@@ -90,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session, storeVersion]);
 
   const needsProfileSetup =
+    profileSaving ||
     (role === "student" && !!currentStudent && !currentStudent.profileCompleted) ||
     (role === "teacher" && !!currentTeacher && !currentTeacher.profileCompleted);
 
@@ -116,12 +120,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const completeStudentProfile = useCallback(
     async (updates: Partial<Student>, newPassword?: string) => {
       if (!session || session.role !== "student") return { success: false, error: "ไม่พบบัญชีนักศึกษาที่เข้าสู่ระบบ" };
-      if (newPassword) {
-        const pw = await setInitialPassword("student", session.entityId, newPassword);
-        if (!pw.success) return pw;
+      setProfileSaving(!dbStore.getStudentById(session.entityId)?.profileCompleted);
+      try {
+        if (newPassword) {
+          const pw = await setInitialPassword("student", session.entityId, newPassword);
+          if (!pw.success) return pw;
+        }
+        await dbStore.saveProfile("student", session.entityId, { ...updates, profileCompleted: true });
+        return { success: true };
+      } finally {
+        setProfileSaving(false);
       }
-      const updated = dbStore.updateStudentProfile(session.entityId, { ...updates, profileCompleted: true });
-      return updated ? { success: true } : { success: false, error: "บันทึกข้อมูลไม่สำเร็จ" };
     },
     [session]
   );
@@ -129,12 +138,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const completeTeacherProfile = useCallback(
     async (updates: Partial<Teacher>, newPassword?: string) => {
       if (!session || session.role !== "teacher") return { success: false, error: "ไม่พบบัญชีอาจารย์ที่เข้าสู่ระบบ" };
-      if (newPassword) {
-        const pw = await setInitialPassword("teacher", session.entityId, newPassword);
-        if (!pw.success) return pw;
+      setProfileSaving(!dbStore.getTeacherById(session.entityId)?.profileCompleted);
+      try {
+        if (newPassword) {
+          const pw = await setInitialPassword("teacher", session.entityId, newPassword);
+          if (!pw.success) return pw;
+        }
+        await dbStore.saveProfile("teacher", session.entityId, { ...updates, profileCompleted: true });
+        return { success: true };
+      } finally {
+        setProfileSaving(false);
       }
-      const updated = dbStore.updateTeacherProfile(session.entityId, { ...updates, profileCompleted: true });
-      return updated ? { success: true } : { success: false, error: "บันทึกข้อมูลไม่สำเร็จ" };
     },
     [session]
   );
@@ -159,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         needsProfileSetup,
         allStudents: students,
         allTeachers: teachers,
+        dataVersion: storeVersion,
         login,
         logout,
         completeStudentProfile,

@@ -9,6 +9,7 @@ import {
 } from "firebase/auth";
 import { auth } from "./config";
 import { dbStore, AccountKind } from "./db";
+import { isCloudDisabled } from "./rtdb";
 import { hashPassword, verifyPassword, validateNewPassword } from "@/lib/security/password";
 import { studentEmailFromCode } from "@/lib/institution";
 import type { Student, Teacher, AdminAccount, AccountSecurity, UserRole } from "@/types";
@@ -123,17 +124,28 @@ export async function verifyAccountPassword(account: ResolvedAccount, password: 
 }
 
 /**
+ * Remembered for the lifetime of the page once Firebase Auth reports that the provider is
+ * not configured on the project, so later logins skip the pointless network round-trip.
+ */
+let firebaseAuthUnavailable = false;
+
+/**
  * Best-effort Firebase Auth sync. Never throws; returns the Firebase uid when a session
  * was established. Silently skips when Auth is disabled on the project
  * (auth/configuration-not-found) or the network is unavailable.
  */
 async function syncFirebaseAuth(account: ResolvedAccount, password: string): Promise<string | undefined> {
-  if (!auth) return undefined;
+  if (!auth || isCloudDisabled() || firebaseAuthUnavailable) return undefined;
   try {
     const cred = await signInWithEmailAndPassword(auth, account.email, password);
     return cred.user.uid;
   } catch (err: any) {
     const code: string = err?.code || "";
+    if (code === "auth/configuration-not-found" || code === "auth/operation-not-allowed") {
+      firebaseAuthUnavailable = true;
+      console.debug("Firebase Auth is not enabled on this project; using database credentials only.");
+      return undefined;
+    }
     const canCreate =
       !account.security.authProvisioned &&
       (code === "auth/user-not-found" || code === "auth/invalid-credential" || code === "auth/invalid-login-credentials");
@@ -268,11 +280,18 @@ export async function setInitialPassword(kind: AccountKind, entityId: string, ne
   }
 
   const passwordHash = await hashPassword(newPassword, account.code);
-  dbStore.updateAccountSecurity(kind, account.id, { passwordHash, passwordChanged: true });
+  if (kind === "student" || kind === "teacher") {
+    await dbStore.saveProfile(kind, account.id, { passwordHash, passwordChanged: true });
+  } else {
+    dbStore.updateAccountSecurity(kind, account.id, { passwordHash, passwordChanged: true });
+  }
 
   try {
     if (auth?.currentUser && norm(auth.currentUser.email) === norm(account.email)) {
-      await updatePassword(auth.currentUser, newPassword);
+      // Optional Auth mirror must not block first-login profile saving.
+      void updatePassword(auth.currentUser, newPassword).catch((e) => {
+        console.debug("Firebase Auth password sync skipped:", e?.code || e?.message);
+      });
     }
   } catch (e: any) {
     console.debug("Firebase Auth password sync skipped:", e?.code || e?.message);

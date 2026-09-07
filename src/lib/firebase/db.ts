@@ -26,11 +26,17 @@ import type {
   ConferenceEvidence,
   ExaminerScoreItem,
   FinalExamEligibility,
+  ProjectDocument,
+  ProjectDocumentType,
   UserRole
 } from "@/types";
 import {
   evaluateQEResult,
-  calculateFinalExamEligibility
+  calculateFinalExamEligibility,
+  getLatestDocument,
+  isDocumentStageApproved,
+  checkQEBookingPrerequisite,
+  checkDocumentSubmissionPrerequisite
 } from "@/lib/rules/engine";
 import { db, auth } from "./config";
 import {
@@ -38,6 +44,8 @@ import {
   subscribeToCollection,
   pushEntityToRTDB,
   pushManyToRTDB,
+  persistChanges,
+  toSafeKey,
   rewriteCollectionKeyed,
   hasLegacyNumericKeys,
   stripUndefined,
@@ -45,7 +53,8 @@ import {
 } from "./rtdb";
 import { doc, setDoc } from "firebase/firestore";
 
-const LOCAL_STORAGE_KEY = "SSRU_CE_DATA_STORE_V4";
+// V5: drops caches that still contain the (now disabled) demo bookings/results.
+const LOCAL_STORAGE_KEY = "SSRU_CE_DATA_STORE_V5";
 
 export const SEED_ADMINS: AdminAccount[] = [
   {
@@ -105,6 +114,7 @@ class AppDataStore {
   private qeResults: QEResult[] = [...MOCK_QE_RESULTS];
   private advisorLogs: AdvisorMeetingLog[] = [...MOCK_ADVISOR_LOGS];
   private conferenceEvidence: ConferenceEvidence[] = [...MOCK_CONFERENCE_EVIDENCE];
+  private projectDocuments: ProjectDocument[] = [];
 
   private listeners: Set<() => void> = new Set();
   private cloudSynced: Partial<Record<CollectionName, boolean>> = {};
@@ -131,46 +141,58 @@ class AppDataStore {
   private initRealtimeListeners() {
     if (this.unsubscribers.length > 0) return;
 
+    // Account registries: seed defines which accounts exist, cloud records win per id.
+    // Transactional collections (bookings, results, logs, evidence): the cloud is the single
+    // source of truth — an empty/missing node means "no records", never "keep the cache".
     this.unsubscribers.push(
       subscribeToCollection<Teacher>("teachers", (items, raw, exists) => {
         this.teachers = mergeRegistry(MOCK_TEACHERS, items);
-        this.afterCloudSnapshot("teachers", this.teachers, items, raw, exists);
+        this.afterCloudSnapshot("teachers", this.teachers, MOCK_TEACHERS, items, raw, exists);
       }),
       subscribeToCollection<Student>("students", (items, raw, exists) => {
         this.students = mergeRegistry(MOCK_STUDENTS, items);
-        this.afterCloudSnapshot("students", this.students, items, raw, exists);
+        this.afterCloudSnapshot("students", this.students, MOCK_STUDENTS, items, raw, exists);
       }),
       subscribeToCollection<AdminAccount>("admins", (items, raw, exists) => {
         this.admins = mergeRegistry(SEED_ADMINS, items);
-        this.afterCloudSnapshot("admins", this.admins, items, raw, exists);
+        this.afterCloudSnapshot("admins", this.admins, SEED_ADMINS, items, raw, exists);
       }),
       subscribeToCollection<QEBooking>("qeBookings", (items, raw, exists) => {
-        this.qeBookings = exists ? items : this.qeBookings;
-        this.afterCloudSnapshot("qeBookings", this.qeBookings, items, raw, exists);
+        this.qeBookings = items;
+        this.afterCloudSnapshot("qeBookings", this.qeBookings, MOCK_QE_BOOKINGS, items, raw, exists);
       }),
       subscribeToCollection<QEResult>("qeResults", (items, raw, exists) => {
-        this.qeResults = exists ? items : this.qeResults;
-        this.afterCloudSnapshot("qeResults", this.qeResults, items, raw, exists);
+        this.qeResults = items;
+        this.afterCloudSnapshot("qeResults", this.qeResults, MOCK_QE_RESULTS, items, raw, exists);
       }),
       subscribeToCollection<AdvisorMeetingLog>("advisorLogs", (items, raw, exists) => {
-        this.advisorLogs = exists ? items : this.advisorLogs;
-        this.afterCloudSnapshot("advisorLogs", this.advisorLogs, items, raw, exists);
+        this.advisorLogs = items;
+        this.afterCloudSnapshot("advisorLogs", this.advisorLogs, MOCK_ADVISOR_LOGS, items, raw, exists);
       }),
       subscribeToCollection<ConferenceEvidence>("conferenceEvidence", (items, raw, exists) => {
-        this.conferenceEvidence = exists ? items : this.conferenceEvidence;
-        this.afterCloudSnapshot("conferenceEvidence", this.conferenceEvidence, items, raw, exists);
+        this.conferenceEvidence = items;
+        this.afterCloudSnapshot("conferenceEvidence", this.conferenceEvidence, MOCK_CONFERENCE_EVIDENCE, items, raw, exists);
+      }),
+      subscribeToCollection<ProjectDocument>("projectDocuments", (items, raw, exists) => {
+        this.projectDocuments = items;
+        this.afterCloudSnapshot("projectDocuments", this.projectDocuments, [], items, raw, exists);
       })
     );
   }
 
   /**
    * Runs after every cloud snapshot: persists the cache, notifies React, and — once per
-   * session — heals the cloud layout (legacy numeric keys) and uploads seed records that
+   * session — heals the cloud layout (legacy numeric keys) and uploads *seed* records that
    * the cloud does not have yet (e.g. the pre-registered student roster).
+   *
+   * Only records defined in code (`seed`) are ever back-filled. Records that merely sit in
+   * a browser's localStorage cache must never be re-uploaded, otherwise data an admin has
+   * deleted from the cloud would silently reappear from any stale client.
    */
   private afterCloudSnapshot<T extends Identified>(
     name: CollectionName,
-    merged: T[],
+    current: T[],
+    seed: T[],
     cloudItems: T[],
     raw: unknown,
     exists: boolean
@@ -184,12 +206,12 @@ class AppDataStore {
 
     if (exists && hasLegacyNumericKeys(raw)) {
       // One-time migration from array-indexed layout to id-keyed layout.
-      void rewriteCollectionKeyed(name, merged);
+      void rewriteCollectionKeyed(name, current);
       return;
     }
 
     const cloudIds = new Set(cloudItems.map((i) => i.id));
-    const missing = merged.filter((i) => !cloudIds.has(i.id));
+    const missing = seed.filter((i) => !cloudIds.has(i.id));
     if (missing.length > 0) {
       void pushManyToRTDB(name, missing);
     }
@@ -239,6 +261,7 @@ class AppDataStore {
       if (Array.isArray(parsed.qeResults)) this.qeResults = parsed.qeResults;
       if (Array.isArray(parsed.advisorLogs)) this.advisorLogs = parsed.advisorLogs;
       if (Array.isArray(parsed.conferenceEvidence)) this.conferenceEvidence = parsed.conferenceEvidence;
+      if (Array.isArray(parsed.projectDocuments)) this.projectDocuments = parsed.projectDocuments;
     } catch (e) {
       console.warn("Could not load cached data, using seed data:", e);
     }
@@ -255,6 +278,7 @@ class AppDataStore {
         qeResults: this.qeResults,
         advisorLogs: this.advisorLogs,
         conferenceEvidence: this.conferenceEvidence,
+        projectDocuments: this.projectDocuments,
       };
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
     } catch (e) {
@@ -333,8 +357,14 @@ class AppDataStore {
     return this.qeBookings;
   }
 
+  /**
+   * A student's bookings, newest first. Cloud snapshots arrive keyed by id (oldest first),
+   * so callers must not rely on insertion order — sort explicitly.
+   */
   public getQEBookingsByStudent(studentId: string): QEBooking[] {
-    return this.qeBookings.filter((b) => b.studentId === studentId || b.studentCode === studentId);
+    return this.qeBookings
+      .filter((b) => b.studentId === studentId || b.studentCode === studentId)
+      .sort((a, b) => (b.submissionDate || "").localeCompare(a.submissionDate || "") || b.id.localeCompare(a.id));
   }
 
   public getQEResults(): QEResult[] {
@@ -345,8 +375,49 @@ class AppDataStore {
     return this.qeResults.find((r) => r.bookingId === bookingId);
   }
 
+  /**
+   * The result that counts for a student: a passed result wins over any failed attempt,
+   * otherwise the most recent one (cloud order is by id, not by time).
+   */
   public getQEResultByStudent(studentId: string): QEResult | undefined {
-    return this.qeResults.find((r) => r.studentId === studentId || r.studentCode === studentId);
+    const mine = this.qeResults
+      .filter((r) => r.studentId === studentId || r.studentCode === studentId)
+      .sort((a, b) => (b.certifiedDate || "").localeCompare(a.certifiedDate || "") || b.id.localeCompare(a.id));
+    return mine.find((r) => r.finalResult === "passed") || mine[0];
+  }
+
+  /** Active (not cancelled, not yet evaluated) QE booking of a student in any round. */
+  public getOpenQEBookingByStudent(studentId: string): QEBooking | undefined {
+    return this.getQEBookingsByStudent(studentId).find((b) => b.status !== "cancelled" && b.status !== "evaluated");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Project documents (Proposal / สอบ 3 บท / สอบ 5 บท)
+  // ---------------------------------------------------------------------------
+  public getProjectDocuments(studentId?: string): ProjectDocument[] {
+    const list = studentId
+      ? this.projectDocuments.filter((d) => d.studentId === studentId || d.studentCode === studentId)
+      : this.projectDocuments;
+    return [...list].sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || "") || b.id.localeCompare(a.id));
+  }
+
+  public getLatestProjectDocument(studentId: string, type: ProjectDocumentType): ProjectDocument | undefined {
+    return getLatestDocument(this.getProjectDocuments(studentId), type);
+  }
+
+  /** Documents waiting for a given advisor (or for everyone when no advisor is given). */
+  public getPendingProjectDocuments(advisorId?: string): ProjectDocument[] {
+    return this.getProjectDocuments().filter((d) => d.status === "submitted" && (!advisorId || d.advisorId === advisorId));
+  }
+
+  /** Id for a new document; generated before the PDF is uploaded so the file can be keyed by it. */
+  public newProjectDocumentId(type: ProjectDocumentType): string {
+    return `DOC-${type.toUpperCase()}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  }
+
+  public nextProjectDocumentVersion(studentId: string, type: ProjectDocumentType): number {
+    const latest = this.getLatestProjectDocument(studentId, type);
+    return (latest?.version || 0) + 1;
   }
 
   public getAdvisorLogs(studentId?: string): AdvisorMeetingLog[] {
@@ -402,6 +473,22 @@ class AppDataStore {
     return updated;
   }
 
+  /** Profile form waits only for the small primary-database write, not optional mirrors. */
+  public async saveProfile(kind: "student" | "teacher", id: string, updates: Partial<Student> | Partial<Teacher>): Promise<void> {
+    const entity = kind === "student" ? this.getStudentById(id) : this.getTeacherById(id);
+    if (!entity) throw new Error("ไม่พบบัญชีผู้ใช้งาน");
+    const collection = kind === "student" ? "students" : "teachers";
+    const changes: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) changes[`${collection}/${toSafeKey(entity.id)}/${key}`] = value;
+    }
+    await persistChanges(changes);
+    if (kind === "student") this.students = this.students.map((s) => s.id === entity.id ? { ...s, ...updates } as Student : s);
+    else this.teachers = this.teachers.map((t) => t.id === entity.id ? { ...t, ...updates } as Teacher : t);
+    mirrorToFirestore(collection, entity.id, updates);
+    this.commit();
+  }
+
   public updateTeacherProfile(teacherId: string, updates: Partial<Teacher>): Teacher | undefined {
     const idx = this.teachers.findIndex((t) => t.id === teacherId || t.teacherCode === teacherId);
     if (idx < 0) return undefined;
@@ -445,12 +532,95 @@ class AppDataStore {
   }
 
   // ---------------------------------------------------------------------------
+  // Project document submissions & review
+  // ---------------------------------------------------------------------------
+  /**
+   * Record a submitted PDF (the file itself has already been persisted under `fileRef`).
+   * The caller supplies the id it used to upload the file; the version is assigned here.
+   */
+  public async submitProjectDocument(
+    input: Omit<ProjectDocument, "version" | "status" | "submittedAt" | "reviewerId" | "reviewerName" | "reviewFeedback" | "reviewedAt">
+  ): Promise<ProjectDocument> {
+    const student = this.getStudentById(input.studentId);
+    if (!student) throw new Error("ไม่พบนักศึกษา");
+    const prerequisite = checkDocumentSubmissionPrerequisite(student, this.getProjectDocuments(student.id), input.docType);
+    if (!prerequisite.canSubmit) throw new Error(prerequisite.reasonTh);
+    const doc: ProjectDocument = {
+      ...input,
+      version: this.nextProjectDocumentVersion(input.studentId, input.docType),
+      status: "submitted",
+      submittedAt: new Date().toISOString(),
+    };
+    await persistChanges({ [`projectDocuments/${toSafeKey(doc.id)}`]: doc });
+    this.projectDocuments = [doc, ...this.projectDocuments.filter((d) => d.id !== doc.id)];
+    mirrorToFirestore("project_documents", doc.id, doc);
+    this.commit();
+    return doc;
+  }
+
+  /** Student withdraws a submission that has not been reviewed yet. Returns the removed record. */
+  public async withdrawProjectDocument(docId: string): Promise<ProjectDocument | undefined> {
+    const doc = this.projectDocuments.find((d) => d.id === docId);
+    if (!doc || doc.status !== "submitted") return undefined;
+    await persistChanges({ [`projectDocuments/${toSafeKey(docId)}`]: null });
+    this.projectDocuments = this.projectDocuments.filter((d) => d.id !== docId);
+    this.commit();
+    return doc;
+  }
+
+  /**
+   * Advisor records the exam result for a document. Approving the chapter3 document is what
+   * marks the 3-chapter exam as passed (and unlocks QE booking); rejecting an approved
+   * chapter3 document revokes it. chapter5 approval is tracked the same way.
+   */
+  public async reviewProjectDocument(
+    docId: string,
+    decision: "approved" | "rejected",
+    reviewer: Teacher,
+    feedback?: string
+  ): Promise<ProjectDocument | undefined> {
+    const doc = this.projectDocuments.find((d) => d.id === docId);
+    if (!doc) return undefined;
+    if (decision === "rejected" && !feedback?.trim()) throw new Error("กรุณาระบุเหตุผลที่ไม่ผ่าน");
+    const updated: ProjectDocument = {
+      ...doc,
+      status: decision,
+      reviewerId: reviewer.id,
+      reviewerName: `${reviewer.prefixTh}${reviewer.firstNameTh} ${reviewer.lastNameTh}`,
+      reviewFeedback: feedback?.trim() || undefined,
+      reviewedAt: new Date().toISOString(),
+    };
+    const student = this.getStudentById(doc.studentId);
+    const docs = this.getProjectDocuments(doc.studentId).map((d) => d.id === docId ? updated : d);
+    const flags: Partial<Student> = {};
+    if (doc.docType === "chapter3") flags.passed3Chapter = isDocumentStageApproved(docs, "chapter3");
+    if (doc.docType === "chapter5") flags.passed5Chapter = isDocumentStageApproved(docs, "chapter5");
+    // One atomic write: a failed review cannot leave an exam flag unlocked in the cloud.
+    const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(docId)}`]: updated };
+    if (student) {
+      for (const [key, value] of Object.entries(flags)) changes[`students/${toSafeKey(student.id)}/${key}`] = value;
+    }
+    await persistChanges(changes);
+    this.projectDocuments = this.projectDocuments.map((d) => d.id === docId ? updated : d);
+    if (student) this.students = this.students.map((s) => s.id === student.id ? { ...s, ...flags } : s);
+    mirrorToFirestore("project_documents", docId, updated);
+    this.commit();
+    return updated;
+  }
+
+  // ---------------------------------------------------------------------------
   // QE booking & evaluation
   // ---------------------------------------------------------------------------
   public createQEBooking(booking: Omit<QEBooking, "id">): QEBooking {
+    const student = this.getStudentById(booking.studentId);
+    if (!student) throw new Error("ไม่พบนักศึกษา");
+    const prerequisite = checkQEBookingPrerequisite(student, booking.trackId, this.getProjectDocuments(student.id));
+    if (!prerequisite.canBook) throw new Error(prerequisite.reasonTh);
+    if (student.passedQE || this.getQEResultByStudent(student.id)?.finalResult === "passed") throw new Error("คุณผ่านการสอบ QE แล้ว");
+    if (this.getOpenQEBookingByStudent(student.id)) throw new Error("มีคำร้องจองสอบที่ยังไม่ได้ประเมินผลอยู่แล้ว");
     const newBooking: QEBooking = {
       ...booking,
-      id: `BK-QE-${Date.now().toString(36).toUpperCase()}`,
+      id: `BK-QE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8)}`,
     };
     this.qeBookings = [newBooking, ...this.qeBookings];
     void pushEntityToRTDB("qeBookings", newBooking.id, newBooking);
@@ -484,7 +654,7 @@ class AppDataStore {
 
     const existingIndex = this.qeResults.findIndex((r) => r.bookingId === bookingId);
     const newResult: QEResult = {
-      id: existingIndex >= 0 ? this.qeResults[existingIndex].id : `RES-QE-${Date.now().toString(36).toUpperCase()}`,
+      id: existingIndex >= 0 ? this.qeResults[existingIndex].id : `RES-QE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8)}`,
       bookingId,
       studentId: booking.studentId,
       studentCode: booking.studentCode,
@@ -513,8 +683,9 @@ class AppDataStore {
 
     // Keep the student's passedQE flag in step with the committee decision.
     const student = this.getStudentById(booking.studentId);
-    if (student && student.passedQE !== (evaluation.finalResult === "passed")) {
-      this.updateStudentProfile(student.id, { passedQE: evaluation.finalResult === "passed" });
+    const passedQE = this.getQEResultByStudent(booking.studentId)?.finalResult === "passed";
+    if (student && student.passedQE !== passedQE) {
+      this.updateStudentProfile(student.id, { passedQE });
     } else {
       this.commit();
     }

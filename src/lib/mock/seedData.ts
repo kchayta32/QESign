@@ -18,11 +18,12 @@ import {
 } from "@/lib/institution";
 
 /**
- * Demo records (4 sample students with bookings / logs / results) are included by
- * default so the workflow can be demonstrated. Set NEXT_PUBLIC_INCLUDE_DEMO_DATA=false
- * to ship a clean roster-only seed.
+ * Demo records (4 sample students with bookings / logs / results) are OFF by default so
+ * production only holds real roster accounts and real bookings. Set
+ * NEXT_PUBLIC_INCLUDE_DEMO_DATA=true (local demos only) to seed them.
+ * `npm run reset:demo` removes any demo records that were seeded into the cloud earlier.
  */
-export const INCLUDE_DEMO_DATA = process.env.NEXT_PUBLIC_INCLUDE_DEMO_DATA !== "false";
+export const INCLUDE_DEMO_DATA = process.env.NEXT_PUBLIC_INCLUDE_DEMO_DATA === "true";
 
 export const CURRENT_ACADEMIC_YEAR_BE = "2569";
 export const CURRENT_SEMESTER = 1;

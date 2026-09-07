@@ -25,6 +25,8 @@ interface QEBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (booking: QEBooking) => void;
+  /** Shown when the 3-chapter prerequisite blocks booking, so the student can go submit the document. */
+  onOpenDocuments?: () => void;
 }
 
 export default function QEBookingModal({
@@ -34,6 +36,7 @@ export default function QEBookingModal({
   isOpen,
   onClose,
   onSuccess,
+  onOpenDocuments,
 }: QEBookingModalProps) {
   const qeRounds = rounds.filter((r) => r.type === "QE");
   const initialRound = qeRounds.find((r) => r.isActive) || qeRounds[0];
@@ -65,10 +68,14 @@ export default function QEBookingModal({
     }
   };
 
-  // Rule 1: academic prerequisite (status + 3-chapter proposal exam)
-  const prerequisite = checkQEBookingPrerequisite(student, selectedTrack);
+  // Rule 1: academic prerequisite (status + 3-chapter exam passed via the document pipeline)
+  const documents = dbStore.getProjectDocuments(student.id);
+  const prerequisite = checkQEBookingPrerequisite(student, selectedTrack, documents);
+  const blockedBy3Chapter = !prerequisite.canBook && student.status === "active";
 
   // Booking-window & capacity rules
+  const alreadyPassed = student.passedQE || dbStore.getQEResultByStudent(student.id)?.finalResult === "passed";
+  const openBooking = dbStore.getOpenQEBookingByStudent(student.id);
   const existingActive = dbStore
     .getQEBookingsByStudent(student.id)
     .find((b) => b.status !== "cancelled" && b.roundId === currentRound?.id);
@@ -80,7 +87,9 @@ export default function QEBookingModal({
   let blockReason = "";
   if (!currentRound) blockReason = "ยังไม่มีรอบสอบ QE ที่เปิดรับจองในขณะนี้";
   else if (!prerequisite.canBook) blockReason = prerequisite.reasonTh;
+  else if (alreadyPassed) blockReason = "คุณผ่านการสอบ QE แล้ว ไม่จำเป็นต้องจองสอบอีก";
   else if (existingActive) blockReason = `คุณมีคำร้องจองสอบในรอบนี้อยู่แล้ว (${existingActive.id}) ไม่สามารถจองซ้ำได้`;
+  else if (openBooking) blockReason = `คุณมีคำร้องจองสอบที่ยังไม่ได้ประเมินผลอยู่แล้ว (${openBooking.id} • ${openBooking.examDate}) กรุณารอผลสอบก่อนจองใหม่`;
   else if (deadlinePassed) blockReason = `รอบสอบนี้ปิดรับจองแล้ว (หมดเขต ${currentRound.bookingDeadline})`;
   else if (quotaFull) blockReason = `โควตาที่นั่งของแทร็ก ${currentTrack.code} เต็มแล้ว (${currentTrack.activeBookingsCount}/${currentTrack.quotaTotal})`;
   const canBook = blockReason === "";
@@ -137,6 +146,8 @@ export default function QEBookingModal({
 
       onSuccess(newBooking);
       onClose();
+    } catch (error: any) {
+      setSubmitError(error?.message || "บันทึกการจองไม่สำเร็จ");
     } finally {
       setIsSubmitting(false);
     }
@@ -183,11 +194,20 @@ export default function QEBookingModal({
             ) : (
               <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             )}
-            <div className="text-xs">
+            <div className="text-xs flex-1">
               <p className="font-bold">
                 {canBook ? "คุณสมบัติผ่านเกณฑ์ พร้อมจองสอบ (Eligible to Book)" : "ไม่สามารถจองสอบได้ในขณะนี้"}
               </p>
               <p className="mt-0.5 opacity-90 leading-relaxed">{canBook ? prerequisite.reasonTh : blockReason}</p>
+              {blockedBy3Chapter && onOpenDocuments && (
+                <button
+                  type="button"
+                  onClick={onOpenDocuments}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 transition-colors"
+                >
+                  ไปที่เมนูเอกสารโครงงาน (ส่งเอกสารสอบ 3 บท) →
+                </button>
+              )}
             </div>
           </div>
 

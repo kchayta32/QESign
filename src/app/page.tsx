@@ -58,6 +58,16 @@ export default function HomePage() {
                 </div>
               </div>
 
+              <div className="p-4 rounded-2xl bg-ssru-50/60 border border-ssru-crimson/20 flex items-start space-x-3.5">
+                <div className="w-8 h-8 rounded-xl bg-ssru-crimson text-white flex items-center justify-center font-bold text-xs flex-shrink-0">0</div>
+                <div className="space-y-1">
+                  <h4 className="text-xs md:text-sm font-bold text-neutral-charcoal">ส่งเอกสารโครงงาน (PDF): Proposal → สอบ 3 บท → สอบ 5 บท</h4>
+                  <p className="text-xs text-neutral-500 leading-relaxed">
+                    นักศึกษาอัปโหลดไฟล์ .pdf ให้อาจารย์ที่ปรึกษาบันทึกผล ผ่าน/ไม่ผ่าน — <span className="font-bold text-ssru-crimson">ต้องสอบ 3 บทผ่านแล้วเท่านั้น</span> จึงจะจองสอบ QE ได้
+                  </p>
+                </div>
+              </div>
+
               <GateCard
                 n={1}
                 color="bg-amber-100 text-amber-800"

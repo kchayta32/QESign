@@ -1,5 +1,5 @@
 import { rtdb } from "./config";
-import { ref, set, update, onValue, get } from "firebase/database";
+import { ref, set, update, onValue, get, remove } from "firebase/database";
 import type {
   Track,
   Teacher,
@@ -9,7 +9,8 @@ import type {
   QEBooking,
   QEResult,
   AdvisorMeetingLog,
-  ConferenceEvidence
+  ConferenceEvidence,
+  ProjectDocument
 } from "@/types";
 
 export const RTDB_ROOT = "ssru_ce";
@@ -36,6 +37,7 @@ export interface SSRUCERealtimeState {
   qeResults: QEResult[];
   advisorLogs: AdvisorMeetingLog[];
   conferenceEvidence: ConferenceEvidence[];
+  projectDocuments: ProjectDocument[];
 }
 
 export type CollectionName = keyof SSRUCERealtimeState;
@@ -50,6 +52,7 @@ export const COLLECTION_NAMES: CollectionName[] = [
   "qeResults",
   "advisorLogs",
   "conferenceEvidence",
+  "projectDocuments",
 ];
 
 /**
@@ -135,6 +138,35 @@ export async function pushEntityToRTDB(
     return true;
   } catch (e) {
     console.warn(`Realtime Database push error on ${collectionName}/${entityId}:`, e);
+    return false;
+  }
+}
+
+/** Acknowledged multi-path write: callers must not report success for queued/failed writes. */
+export async function persistChanges(changes: Record<string, unknown>): Promise<void> {
+  if (isCloudDisabled()) return; // explicit offline test mode only
+  if (!rtdb) throw new Error("ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาลองใหม่");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      update(ref(rtdb, RTDB_ROOT), stripUndefined(changes)),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("ยังไม่ได้รับการยืนยันจากฐานข้อมูล กรุณาตรวจสอบการเชื่อมต่อและลองใหม่")), 15000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Delete a single record at /ssru_ce/<collection>/<id>. */
+export async function removeEntityFromRTDB(collectionName: CollectionName, entityId: string): Promise<boolean> {
+  if (!cloudAvailable()) return false;
+  try {
+    await remove(ref(rtdb, `${RTDB_ROOT}/${collectionName}/${toSafeKey(entityId)}`));
+    return true;
+  } catch (e) {
+    console.warn(`Realtime Database remove error on ${collectionName}/${entityId}:`, e);
     return false;
   }
 }

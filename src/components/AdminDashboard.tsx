@@ -5,7 +5,8 @@ import { useAuth } from "@/context/AuthContext";
 import { dbStore, AccountKind } from "@/lib/firebase/db";
 import { formatThaiDateTime } from "@/lib/utils";
 import { DEPARTMENT_CE_TH } from "@/lib/institution";
-import type { Student, Teacher } from "@/types";
+import { getLatestDocument, hasPassed3ChapterExam } from "@/lib/rules/engine";
+import type { ProjectDocumentType, Student, Teacher } from "@/types";
 import {
   ShieldCheck,
   Calendar,
@@ -42,7 +43,7 @@ function downloadCsv(filename: string, header: string[], rows: unknown[][]) {
 }
 
 export default function AdminDashboard() {
-  const { allStudents, allTeachers } = useAuth();
+  const { allStudents, allTeachers, dataVersion } = useAuth();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [newCode, setNewCode] = useState("");
@@ -55,12 +56,24 @@ export default function AdminDashboard() {
   const students = allStudents;
   const teachers = allTeachers;
 
+  // Eligibility depends on bookings/results/logs too, so recompute on every store change
+  // (the students array reference alone does not change when a booking is evaluated).
   const stats = useMemo(() => {
+    void dataVersion;
     const eligible = students.filter((s) => dbStore.getStudentEligibility(s.id).isFinalEligible).length;
     const profiled = students.filter((s) => s.profileCompleted).length;
     const loggedIn = students.filter((s) => s.lastLoginAt).length;
-    return { eligible, profiled, loggedIn };
-  }, [students]);
+    const docs = dbStore.getProjectDocuments();
+    const docsPending = docs.filter((d) => d.status === "submitted").length;
+    const passed3 = students.filter((s) => hasPassed3ChapterExam(s, dbStore.getProjectDocuments(s.id))).length;
+    return { eligible, profiled, loggedIn, docsTotal: docs.length, docsPending, passed3 };
+  }, [students, dataVersion]);
+
+  const docStatusLabel = (studentId: string, type: ProjectDocumentType): string => {
+    const d = getLatestDocument(dbStore.getProjectDocuments(studentId), type);
+    if (!d) return "ยังไม่ส่ง";
+    return d.status === "approved" ? "ผ่าน" : d.status === "rejected" ? "ไม่ผ่าน" : "รอตรวจ";
+  };
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -99,13 +112,16 @@ export default function AdminDashboard() {
   }, [students, teachers, filter, query]);
 
   const handleExport = () => {
-    const header = ["รหัสนักศึกษา", "คำนำหน้า", "ชื่อ", "นามสกุล", "อีเมล", "โทรศัพท์", "แทร็ก", "ชั้นปี", "อาจารย์ที่ปรึกษา", "หัวข้อโครงงาน", "ผ่าน 3 บท", "บันทึกที่ปรึกษา (อนุมัติ)", "ผล QE", "มติ QE", "เอกสาร Conference", "สิทธิ์สอบ Final", "กรอกโปรไฟล์แล้ว", "เข้าใช้งานล่าสุด"];
+    const header = ["รหัสนักศึกษา", "คำนำหน้า", "ชื่อ", "นามสกุล", "อีเมล", "โทรศัพท์", "แทร็ก", "ชั้นปี", "อาจารย์ที่ปรึกษา", "หัวข้อโครงงาน", "เอกสาร Proposal", "เอกสารสอบ 3 บท", "ผ่าน 3 บท", "เอกสารสอบ 5 บท", "บันทึกที่ปรึกษา (อนุมัติ)", "ผล QE", "มติ QE", "เอกสาร Conference", "สิทธิ์สอบ Final", "กรอกโปรไฟล์แล้ว", "เข้าใช้งานล่าสุด"];
     const body = students.map((s: Student) => {
       const e = dbStore.getStudentEligibility(s.id);
       return [
         s.studentCode, s.prefixTh, s.firstNameTh, s.lastNameTh, s.email, s.phone, s.trackId, s.yearLevel,
         dbStore.getTeacherDisplayName(s.advisorId), s.projectTitleTh || "",
-        s.passed3Chapter ? "ผ่าน" : "ยังไม่ผ่าน",
+        docStatusLabel(s.id, "proposal"),
+        docStatusLabel(s.id, "chapter3"),
+        hasPassed3ChapterExam(s, dbStore.getProjectDocuments(s.id)) ? "ผ่าน" : "ยังไม่ผ่าน",
+        docStatusLabel(s.id, "chapter5"),
         `${e.advisorLogsCount}/${e.advisorLogsRequired}`,
         e.qeStatus, `${e.qePassVotes}/3`, e.conferenceStatus,
         e.isFinalEligible ? "ปลดล็อกแล้ว" : "ยังไม่ครบเงื่อนไข",
@@ -175,9 +191,11 @@ export default function AdminDashboard() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mt-6 pt-6 border-t border-neutral-100">
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mt-6 pt-6 border-t border-neutral-100">
           <Stat label="นักศึกษาในระบบ" value={`${students.length} คน`} />
           <Stat label="กรอกโปรไฟล์แล้ว / เข้าใช้งานแล้ว" value={`${stats.profiled} / ${stats.loggedIn}`} />
+          <Stat label="เอกสารโครงงาน (รอตรวจ / ทั้งหมด)" value={`${stats.docsPending} / ${stats.docsTotal}`} accent={stats.docsPending > 0 ? "amber" : undefined} />
+          <Stat label="ผ่านสอบ 3 บท (พร้อมจอง QE)" value={`${stats.passed3} คน`} />
           <Stat label="จองสอบ QE รวม" value={`${qeBookings.length} คำร้อง`} accent="crimson" />
           <Stat label="ปลดล็อก Final แล้ว (3/3)" value={`${stats.eligible} คน`} accent="emerald" />
           <Stat label="อาจารย์ / กรรมการ" value={`${teachers.length} ท่าน`} />
@@ -330,12 +348,14 @@ export default function AdminDashboard() {
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: "crimson" | "emerald" }) {
+function Stat({ label, value, accent }: { label: string; value: string; accent?: "crimson" | "emerald" | "amber" }) {
   const cls =
     accent === "crimson"
       ? "bg-ssru-50/50 border-ssru-crimson/20 text-ssru-crimson"
       : accent === "emerald"
       ? "bg-emerald-50/70 border-emerald-200 text-emerald-700"
+      : accent === "amber"
+      ? "bg-amber-50/80 border-amber-200 text-amber-800"
       : "bg-neutral-50 border-neutral-200 text-neutral-charcoal";
   return (
     <div className={`p-4 rounded-2xl border ${cls}`}>
