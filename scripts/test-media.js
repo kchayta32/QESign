@@ -9,6 +9,7 @@ Module._load = function (name, ...args) {
   const actual = originalLoad.call(this, name, ...args);
   if (name === 'firebase/database') return {
     ...actual,
+    get: async () => ({ exists: () => false, val: () => null }), // no live slot reads
     set: (...args) => write(...args),
     update: (ref, changes) => { lastChanges = changes; return write(ref, changes); },
   };

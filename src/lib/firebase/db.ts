@@ -45,6 +45,7 @@ import {
   pushEntityToRTDB,
   pushManyToRTDB,
   persistChanges,
+  readQEBookingSlot,
   toSafeKey,
   rewriteCollectionKeyed,
   hasLegacyNumericKeys,
@@ -615,14 +616,19 @@ class AppDataStore {
     if (student) {
       for (const [key, value] of Object.entries(flags)) changes[`students/${toSafeKey(student.id)}/${key}`] = value;
     }
-    // Revocation cancels unexamined bookings; restoring chapter3 requires a fresh booking.
+    // A concurrent booking may not yet be visible in this reviewer's collection.
+    // Read its authoritative slot; the student validator rejects any later race that
+    // would leave an open booking behind, so the caller can safely retry the review.
+    const slotted = flags.passed3Chapter === false ? await readQEBookingSlot(doc.studentId) : undefined;
+    const candidates = this.getQEBookingsByStudent(doc.studentId).filter((b) => b.id !== slotted?.id);
+    if (slotted?.studentId === doc.studentId) candidates.push(slotted);
     const cancelled = flags.passed3Chapter === false
-      ? this.getQEBookingsByStudent(doc.studentId).filter((b) => b.status !== "evaluated" && b.status !== "cancelled")
+      ? candidates.filter((b) => b.status !== "evaluated" && b.status !== "cancelled")
           .map((b) => ({ ...b, status: "cancelled" as const, notes: "ยกเลิกการจอง: ถูกเพิกถอนผลผ่านสอบ 3 บท" }))
       : [];
     for (const booking of cancelled) changes[`qeBookings/${toSafeKey(booking.id)}`] = booking;
     await persistChanges(changes);
-    this.qeBookings = this.qeBookings.map((b) => cancelled.find((c) => c.id === b.id) || b);
+    this.qeBookings = [...this.qeBookings.filter((b) => !cancelled.some((c) => c.id === b.id)), ...cancelled];
     this.projectDocuments = this.projectDocuments.map((d) => d.id === docId ? updated : d);
     if (student) this.students = this.students.map((s) => s.id === student.id ? { ...s, ...flags } : s);
     mirrorToFirestore("project_documents", docId, updated);
@@ -652,10 +658,13 @@ class AppDataStore {
         [`qeBookings/${toSafeKey(newBooking.id)}`]: newBooking,
         [`qeBookingSlots/${toSafeKey(student.id)}`]: newBooking.id,
       });
-      this.qeBookings = [newBooking, ...this.qeBookings.filter((b) => b.id !== newBooking.id)];
-      mirrorToFirestore("qe_bookings", newBooking.id, newBooking);
+      // A confirmed revocation may already have cancelled this booking while its
+      // original acknowledgement was in flight. Never overwrite that newer state.
+      const confirmed = this.qeBookings.find((b) => b.id === newBooking.id) || newBooking;
+      this.qeBookings = [confirmed, ...this.qeBookings.filter((b) => b.id !== newBooking.id)];
+      mirrorToFirestore("qe_bookings", confirmed.id, confirmed);
       this.commit();
-      return newBooking;
+      return confirmed;
     } finally {
       this.bookingWrites.delete(student.id);
     }

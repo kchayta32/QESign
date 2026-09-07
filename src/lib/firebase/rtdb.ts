@@ -205,6 +205,29 @@ export async function persistChanges(changes: Record<string, unknown>): Promise<
   }
 }
 
+/** Read the authoritative slot, not just a reviewer's possibly stale collection cache. */
+export async function readQEBookingSlot(studentId: string): Promise<QEBooking | undefined> {
+  if (isCloudDisabled()) return undefined;
+  if (!rtdb) throw new Error("ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาลองใหม่");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const read = async () => {
+    const slot = await get(ref(rtdb, `${RTDB_ROOT}/qeBookingSlots/${toSafeKey(studentId)}`));
+    if (!slot.exists()) return undefined;
+    const booking = await get(ref(rtdb, `${RTDB_ROOT}/qeBookings/${toSafeKey(String(slot.val()))}`));
+    return booking.exists() ? booking.val() as QEBooking : undefined;
+  };
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("อ่านคำร้องสอบล่าสุดไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อและลองใหม่")), 8000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Delete a single record at /ssru_ce/<collection>/<id>. */
 export async function removeEntityFromRTDB(collectionName: CollectionName, entityId: string): Promise<boolean> {
   if (!cloudAvailable()) return false;

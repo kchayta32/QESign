@@ -3,7 +3,11 @@
     "ssru_ce": {
       ".read": true,
       ".write": true,
-      "students": { ".indexOn": ["studentCode", "email", "advisorId"] },
+      "students": {
+        "$studentId": {
+          ".validate": "newData.child('passed3Chapter').val() === true || !root.child('ssru_ce/qeBookingSlots').child($studentId).exists() || newData.parent().parent().child('qeBookings').child(root.child('ssru_ce/qeBookingSlots').child($studentId).val()).child('status').val() === 'cancelled' || newData.parent().parent().child('qeBookings').child(root.child('ssru_ce/qeBookingSlots').child($studentId).val()).child('status').val() === 'evaluated'"
+        }, ".indexOn": ["studentCode", "email", "advisorId"]
+      },
       "teachers": { ".indexOn": ["teacherCode", "email"] },
       "qeBookings": {
         "$bookingId": {

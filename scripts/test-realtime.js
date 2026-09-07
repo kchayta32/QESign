@@ -21,6 +21,11 @@ Module._load = function (name, ...args) {
       return () => callbacks.delete(name);
     },
     set: async () => {},
+    get: async (reference) => {
+      const [collection, id] = reference.toString().split('/ssru_ce/')[1].split('/');
+      const value = structuredClone(snapshots[collection]?.[id] ?? null);
+      return { exists: () => value !== null, val: () => value };
+    },
     update: (_reference, changes) => {
       const before = structuredClone(snapshots);
       const collections = new Set();
@@ -84,11 +89,35 @@ const { toKeyedMap } = require('../src/lib/firebase/rtdb.ts');
     studentNameTh: 'Test', trackId: 'SW', roundId: 'TEST', roundName: 'Test', examDate: '2026-09-10',
     timeSlot: '09:00', room: 'Test', status: 'pending', examinerIds: ['A', 'B', 'C'], examinerNames: ['A', 'B', 'C'],
     prerequisitePassed: true, submissionDate: '2026-09-07' };
-  const first = dbStore.createQEBooking(bookingInput);
-  await assert.rejects(dbStore.createQEBooking(bookingInput), /กำลังบันทึก/);
-  assert.equal(dbStore.getOpenQEBookingByStudent(student.id), undefined);
-  settle(true); const booking = await first;
-  mode = 'ack';
+  for (const order of ['booking-first', 'revocation-first']) {
+    mode = 'defer';
+    const first = dbStore.createQEBooking(bookingInput);
+    const bookingAck = settle;
+    await assert.rejects(dbStore.createQEBooking(bookingInput), /กำลังบันทึก/);
+    assert.equal(dbStore.getOpenQEBookingByStudent(student.id), undefined, 'reviewer has not seen the concurrent booking');
+    const revoking = dbStore.reviewProjectDocument('REALTIME-C3', 'rejected', teacher, 'Race test');
+    await new Promise((resolve) => setImmediate(resolve)); // authoritative slot read completes
+    const revokeAck = settle;
+    assert.notEqual(bookingAck, revokeAck);
+    let racedBooking;
+    if (order === 'booking-first') {
+      bookingAck(true); racedBooking = await first;
+      revokeAck(true); await revoking;
+    } else {
+      revokeAck(true); await revoking;
+      bookingAck(true); racedBooking = await first;
+      assert.equal(racedBooking.status, 'cancelled', 'late booking acknowledgement cannot restore pending');
+    }
+    assert.equal(passed(), false);
+    assert.equal(snapshots.qeBookings[racedBooking.id].status, 'cancelled');
+    assert.equal(dbStore.getOpenQEBookingByStudent(student.id), undefined);
+    mode = 'ack';
+    await dbStore.reviewProjectDocument('REALTIME-C3', 'approved', teacher);
+    assert.equal(passed(), true);
+    assert.equal(dbStore.getOpenQEBookingByStudent(student.id), undefined, 'reapproval requires a new booking');
+    console.log(`[PASS] stale reviewer booking/revocation race (${order} ACK): cancelled in cloud/store; reapproval never restores it`);
+  }
+  const booking = await dbStore.createQEBooking(bookingInput);
   const scores = ['A', 'B', 'C'].map((id) => ({ examinerId: id, examinerName: id, score: 80,
     isPass: true, comments: '', evaluatedAt: '', signatureStatus: true }));
   const results = await Promise.all([dbStore.updateExaminerEvaluation(booking.id, scores), dbStore.updateExaminerEvaluation(booking.id, scores)]);

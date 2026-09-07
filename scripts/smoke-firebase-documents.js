@@ -96,8 +96,36 @@ const read = async (path) => (await get(ref(rtdb, `${RTDB_ROOT}/${path}`))).val(
         const winner = candidates[race.findIndex((response) => response.status === 200)];
         assert.equal(await read(`qeBookingSlots/${studentId}`), winner.id);
         assert.equal(await read(`qeBookings/${candidates.find((candidate) => candidate.id !== winner.id).id}`), null);
-        await persistChanges({ [`qeBookings/${winner.id}/status`]: 'cancelled' });
         console.log('[PASS] independent concurrent clients: one booking accepted, one rejected by database slot validation');
+        assert.equal(dbStore.getOpenQEBookingByStudent(studentId), undefined, 'reviewer cache has not seen the REST booking');
+        const revokePayload = { [`students/${studentId}/passed3Chapter`]: false,
+          [`projectDocuments/${id}`]: { ...(await read(`projectDocuments/${id}`)), status: 'rejected', reviewFeedback: 'Race test' } };
+        await assert.rejects(update(ref(rtdb, RTDB_ROOT), revokePayload), /PERMISSION_DENIED/);
+        assert.equal((await read(`students/${studentId}`)).passed3Chapter, true, 'stale revocation rejected atomically');
+        await dbStore.reviewProjectDocument(id, 'rejected', teacher, 'Authoritative slot retry');
+        assert.equal((await read(`qeBookings/${winner.id}`)).status, 'cancelled');
+        await dbStore.reviewProjectDocument(id, 'approved', teacher);
+        assert.equal((await read(`qeBookings/${winner.id}`)).status, 'cancelled');
+
+        const revocationRaceId = `${prefix}-REVOCATION-RACE`;
+        cleanup[`qeBookings/${revocationRaceId}`] = null;
+        const concurrentPayloads = [
+          { [`qeBookings/${revocationRaceId}`]: { ...bookingInput, id: revocationRaceId }, [`qeBookingSlots/${studentId}`]: revocationRaceId },
+          revokePayload,
+        ];
+        const revocationRace = await Promise.all(concurrentPayloads.map((payload) => fetch(`${baseUrl}/${RTDB_ROOT}.json`, {
+          method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+        })));
+        assert.deepEqual(revocationRace.map((response) => response.status).sort(), [200, 401]);
+        // Retry against the authoritative slot, regardless of which request won.
+        await dbStore.reviewProjectDocument(id, 'rejected', teacher, 'Retry race safely');
+        assert.equal((await read(`students/${studentId}`)).passed3Chapter, false);
+        const raced = await read(`qeBookings/${revocationRaceId}`);
+        assert.ok(raced === null || raced.status === 'cancelled');
+        await dbStore.reviewProjectDocument(id, 'approved', teacher);
+        assert.ok((await read(`qeBookings/${revocationRaceId}`))?.status !== 'pending');
+        assert.equal(dbStore.getOpenQEBookingByStudent(studentId), undefined);
+        console.log('[PASS] booking versus revocation race is serialized by rules; stale reviewer retries cancel authoritative booking; reapproval never revives it');
         const booking = await dbStore.createQEBooking(bookingInput);
         cleanup[`qeBookings/${booking.id}`] = null;
         assert.equal((await read(`qeBookings/${booking.id}`)).status, 'pending');
