@@ -151,7 +151,7 @@ export async function persistChanges(changes: Record<string, unknown>): Promise<
     await Promise.race([
       update(ref(rtdb, RTDB_ROOT), stripUndefined(changes)),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("ยังไม่ได้รับการยืนยันจากฐานข้อมูล กรุณาตรวจสอบการเชื่อมต่อและลองใหม่")), 15000);
+        timer = setTimeout(() => reject(Object.assign(new Error("ยังไม่ได้รับการยืนยันจากฐานข้อมูล กรุณาตรวจสอบการเชื่อมต่อและลองใหม่"), { code: "WRITE_UNCONFIRMED" })), 15000);
       }),
     ]);
   } finally {

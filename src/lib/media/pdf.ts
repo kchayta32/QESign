@@ -1,8 +1,7 @@
-import { ref as storageRef, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
-import { ref as dbRef, set, get, remove } from "firebase/database";
+import { ref as storageRef, deleteObject } from "firebase/storage";
+import { ref as dbRef, get, remove } from "firebase/database";
 import { storage, rtdb } from "@/lib/firebase/config";
-import { RTDB_ROOT, isCloudDisabled, toSafeKey } from "@/lib/firebase/rtdb";
-import { USE_FIREBASE_STORAGE } from "./avatar";
+import { RTDB_ROOT, isCloudDisabled } from "@/lib/firebase/rtdb";
 
 /**
  * Project documents (Proposal / สอบ 3 บท / สอบ 5 บท) are PDF files.
@@ -13,8 +12,8 @@ import { USE_FIREBASE_STORAGE } from "./avatar";
  * Firebase Storage bucket. A Realtime Database string node may hold at most 10 MB, so
  * uploads are capped at PDF_MAX_FILE_MB (base64 adds ~33 %).
  *
- * When NEXT_PUBLIC_FIREBASE_USE_STORAGE=true the file goes to Firebase Storage instead
- * and the record stores the public download URL.
+ * PDF bytes and metadata always use one atomic RTDB write. Storage URLs from legacy
+ * records can still be opened, but new uploads cannot leave orphaned Storage files.
  */
 export const PDF_MAX_FILE_MB = 5;
 export const PDF_MAX_FILE_BYTES = PDF_MAX_FILE_MB * 1024 * 1024;
@@ -116,33 +115,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-/**
- * Persist a PDF and return the reference to store on the document record.
- * Unlike avatars this MUST be acknowledged before the record is created — the file is the
- * deliverable the advisor has to be able to open.
- */
-export async function uploadPdfDocument(docId: string, dataUrl: string): Promise<string> {
-  if (USE_FIREBASE_STORAGE && storage) {
-    try {
-      const fileRef = storageRef(storage, `documents/${toSafeKey(docId)}.pdf`);
-      return await withTimeout<string>(
-        uploadString(fileRef, dataUrl, "data_url", { contentType: "application/pdf" }).then(() => getDownloadURL(fileRef)),
-        PDF_UPLOAD_TIMEOUT_MS,
-        "Firebase Storage upload"
-      );
-    } catch (e: any) {
-      console.debug("Firebase Storage unavailable, using database document store:", e?.code || e?.message);
-    }
-  }
-  if (!rtdb || isCloudDisabled()) {
-    throw new Error("ไม่สามารถเชื่อมต่อฐานข้อมูลเพื่ออัปโหลดไฟล์ได้ กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ต");
-  }
-  const key = toSafeKey(docId);
-  await withTimeout(set(dbRef(rtdb, `${RTDB_ROOT}/${DOCUMENT_FILES_NODE}/${key}`), dataUrl), PDF_UPLOAD_TIMEOUT_MS, "Database document write");
-  pdfCache.set(key, dataUrl);
-  return `${RTDB_PDF_SCHEME}${key}`;
-}
-
+// Uploads belong to dbStore.submitProjectDocument: bytes and metadata commit atomically.
 const pdfCache = new Map<string, string>();
 
 /** Resolve a document reference to something a browser can open (data URL or https URL). */
@@ -153,7 +126,7 @@ export async function resolvePdfDocument(fileRef: string): Promise<string | null
   const cached = pdfCache.get(key);
   if (cached) return cached;
   if (!rtdb || isCloudDisabled()) return null;
-  const snap = await get(dbRef(rtdb, `${RTDB_ROOT}/${DOCUMENT_FILES_NODE}/${key}`));
+  const snap = await withTimeout(get(dbRef(rtdb, `${RTDB_ROOT}/${DOCUMENT_FILES_NODE}/${key}`)), PDF_UPLOAD_TIMEOUT_MS, "Database document read");
   const val = snap.exists() ? String(snap.val()) : null;
   if (val) pdfCache.set(key, val);
   return val;

@@ -535,23 +535,35 @@ class AppDataStore {
   // Project document submissions & review
   // ---------------------------------------------------------------------------
   /**
-   * Record a submitted PDF (the file itself has already been persisted under `fileRef`).
-   * The caller supplies the id it used to upload the file; the version is assigned here.
+   * Persist PDF bytes and metadata together under the caller's stable submission id.
+   * Retrying an unconfirmed submission reuses its id and version.
    */
   public async submitProjectDocument(
-    input: Omit<ProjectDocument, "version" | "status" | "submittedAt" | "reviewerId" | "reviewerName" | "reviewFeedback" | "reviewedAt">
+    input: Omit<ProjectDocument, "version" | "status" | "submittedAt" | "reviewerId" | "reviewerName" | "reviewFeedback" | "reviewedAt">,
+    pdfDataUrl: string
   ): Promise<ProjectDocument> {
     const student = this.getStudentById(input.studentId);
     if (!student) throw new Error("ไม่พบนักศึกษา");
-    const prerequisite = checkDocumentSubmissionPrerequisite(student, this.getProjectDocuments(student.id), input.docType);
+    const existing = this.projectDocuments.find((d) => d.id === input.id);
+    // Retry an unconfirmed operation with the SAME id, version and payload reference.
+    if (existing && (existing.status !== "submitted" || existing.studentId !== input.studentId || existing.docType !== input.docType || existing.fileName !== input.fileName || existing.fileSize !== input.fileSize)) {
+      throw new Error("รายการนี้ถูกบันทึกหรือเปลี่ยนแปลงแล้ว กรุณาโหลดรายการใหม่");
+    }
+    const prerequisite = checkDocumentSubmissionPrerequisite(student, this.getProjectDocuments(student.id).filter((d) => d.id !== input.id), input.docType);
     if (!prerequisite.canSubmit) throw new Error(prerequisite.reasonTh);
-    const doc: ProjectDocument = {
+    const doc: ProjectDocument = existing || {
       ...input,
       version: this.nextProjectDocumentVersion(input.studentId, input.docType),
       status: "submitted",
       submittedAt: new Date().toISOString(),
     };
-    await persistChanges({ [`projectDocuments/${toSafeKey(doc.id)}`]: doc });
+    const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(doc.id)}`]: doc };
+    if (typeof pdfDataUrl !== "string" || !pdfDataUrl.startsWith("data:application/pdf;base64,") || pdfDataUrl.length <= 28 || pdfDataUrl.length > 7_000_000) throw new Error("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกินกำหนด");
+    if (doc.fileRef !== `pdf://${toSafeKey(doc.id)}`) throw new Error("การอ้างอิงไฟล์ไม่ตรงกับรายการส่ง");
+    changes[`documentFiles/${toSafeKey(doc.id)}`] = pdfDataUrl;
+    // Atomic metadata + bytes: rejected writes leave neither an orphan nor a broken link.
+    // On timeout both may still commit together; realtime snapshots reconcile the same id.
+    await persistChanges(changes);
     this.projectDocuments = [doc, ...this.projectDocuments.filter((d) => d.id !== doc.id)];
     mirrorToFirestore("project_documents", doc.id, doc);
     this.commit();
@@ -562,7 +574,9 @@ class AppDataStore {
   public async withdrawProjectDocument(docId: string): Promise<ProjectDocument | undefined> {
     const doc = this.projectDocuments.find((d) => d.id === docId);
     if (!doc || doc.status !== "submitted") return undefined;
-    await persistChanges({ [`projectDocuments/${toSafeKey(docId)}`]: null });
+    const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(docId)}`]: null };
+    if (doc.fileRef.startsWith("pdf://")) changes[`documentFiles/${toSafeKey(docId)}`] = null;
+    await persistChanges(changes);
     this.projectDocuments = this.projectDocuments.filter((d) => d.id !== docId);
     this.commit();
     return doc;
@@ -600,7 +614,14 @@ class AppDataStore {
     if (student) {
       for (const [key, value] of Object.entries(flags)) changes[`students/${toSafeKey(student.id)}/${key}`] = value;
     }
+    // Revocation cancels unexamined bookings; restoring chapter3 requires a fresh booking.
+    const cancelled = flags.passed3Chapter === false
+      ? this.getQEBookingsByStudent(doc.studentId).filter((b) => b.status !== "evaluated" && b.status !== "cancelled")
+          .map((b) => ({ ...b, status: "cancelled" as const, notes: "ยกเลิกการจอง: ถูกเพิกถอนผลผ่านสอบ 3 บท" }))
+      : [];
+    for (const booking of cancelled) changes[`qeBookings/${toSafeKey(booking.id)}`] = booking;
     await persistChanges(changes);
+    this.qeBookings = this.qeBookings.map((b) => cancelled.find((c) => c.id === b.id) || b);
     this.projectDocuments = this.projectDocuments.map((d) => d.id === docId ? updated : d);
     if (student) this.students = this.students.map((s) => s.id === student.id ? { ...s, ...flags } : s);
     mirrorToFirestore("project_documents", docId, updated);
@@ -611,7 +632,7 @@ class AppDataStore {
   // ---------------------------------------------------------------------------
   // QE booking & evaluation
   // ---------------------------------------------------------------------------
-  public createQEBooking(booking: Omit<QEBooking, "id">): QEBooking {
+  public async createQEBooking(booking: Omit<QEBooking, "id">): Promise<QEBooking> {
     const student = this.getStudentById(booking.studentId);
     if (!student) throw new Error("ไม่พบนักศึกษา");
     const prerequisite = checkQEBookingPrerequisite(student, booking.trackId, this.getProjectDocuments(student.id));
@@ -622,8 +643,8 @@ class AppDataStore {
       ...booking,
       id: `BK-QE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8)}`,
     };
-    this.qeBookings = [newBooking, ...this.qeBookings];
-    void pushEntityToRTDB("qeBookings", newBooking.id, newBooking);
+    await persistChanges({ [`qeBookings/${toSafeKey(newBooking.id)}`]: newBooking });
+    this.qeBookings = [newBooking, ...this.qeBookings.filter((b) => b.id !== newBooking.id)];
     mirrorToFirestore("qe_bookings", newBooking.id, newBooking);
     this.commit();
     return newBooking;
@@ -644,9 +665,14 @@ class AppDataStore {
     return updated;
   }
 
-  public updateExaminerEvaluation(bookingId: string, examinerScores: ExaminerScoreItem[]): QEResult {
+  public async updateExaminerEvaluation(bookingId: string, examinerScores: ExaminerScoreItem[]): Promise<QEResult> {
     const booking = this.qeBookings.find((b) => b.id === bookingId);
     if (!booking) throw new Error("Booking not found");
+    if (booking.status === "cancelled") throw new Error("คำร้องสอบนี้ถูกยกเลิกแล้ว กรุณาจองใหม่เมื่อมีสิทธิ์");
+    const student = this.getStudentById(booking.studentId);
+    if (!student) throw new Error("ไม่พบนักศึกษา");
+    const prerequisite = checkQEBookingPrerequisite(student, booking.trackId, this.getProjectDocuments(student.id));
+    if (!prerequisite.canBook) throw new Error(prerequisite.reasonTh);
 
     const evaluation = evaluateQEResult(examinerScores);
     const round = this.examRounds.find((r) => r.id === booking.roundId);
@@ -670,25 +696,20 @@ class AppDataStore {
       announced: true,
     };
 
-    if (existingIndex >= 0) this.qeResults[existingIndex] = newResult;
-    else this.qeResults = [...this.qeResults, newResult];
-
     const updatedBooking: QEBooking = { ...booking, status: "evaluated" };
-    this.qeBookings = this.qeBookings.map((b) => (b.id === bookingId ? updatedBooking : b));
-
-    void pushEntityToRTDB("qeResults", newResult.id, newResult);
-    void pushEntityToRTDB("qeBookings", updatedBooking.id, updatedBooking);
+    const results = [...this.qeResults.filter((r) => r.id !== newResult.id), newResult];
+    const passedQE = results.some((r) => r.studentId === student.id && r.finalResult === "passed");
+    await persistChanges({
+      [`qeResults/${toSafeKey(newResult.id)}`]: newResult,
+      [`qeBookings/${toSafeKey(bookingId)}`]: updatedBooking,
+      [`students/${toSafeKey(student.id)}/passedQE`]: passedQE,
+    });
+    this.qeResults = [...this.qeResults.filter((r) => r.id !== newResult.id), newResult];
+    this.qeBookings = this.qeBookings.map((b) => b.id === bookingId ? updatedBooking : b);
+    this.students = this.students.map((s) => s.id === student.id ? { ...s, passedQE } : s);
     mirrorToFirestore("qe_results", newResult.id, newResult);
     mirrorToFirestore("qe_bookings", updatedBooking.id, updatedBooking);
-
-    // Keep the student's passedQE flag in step with the committee decision.
-    const student = this.getStudentById(booking.studentId);
-    const passedQE = this.getQEResultByStudent(booking.studentId)?.finalResult === "passed";
-    if (student && student.passedQE !== passedQE) {
-      this.updateStudentProfile(student.id, { passedQE });
-    } else {
-      this.commit();
-    }
+    this.commit();
     return newResult;
   }
 

@@ -8,12 +8,14 @@ const { rtdb } = require('../src/lib/firebase/config.ts');
 const { RTDB_ROOT, persistChanges } = require('../src/lib/firebase/rtdb.ts');
 const { dbStore } = require('../src/lib/firebase/db.ts');
 const { uploadAvatar } = require('../src/lib/media/avatar.ts');
-const { uploadPdfDocument, resolvePdfDocument } = require('../src/lib/media/pdf.ts');
+const { resolvePdfDocument } = require('../src/lib/media/pdf.ts');
 const { checkQEBookingPrerequisite } = require('../src/lib/rules/engine.ts');
 const prefix = `DUO-VERIFY-${Date.now()}`;
 const studentId = `${prefix}-STUDENT`;
 const teacherId = `${prefix}-TEACHER`;
-const types = ['proposal', 'chapter3', 'chapter5'];
+const types = ['proposal', 'chapter3', 'chapter5', 'withdraw'];
+const scores = ['A', 'B', 'C'].map((id) => ({ examinerId: id, examinerName: id, score: 80,
+  isPass: true, comments: '', evaluatedAt: '', signatureStatus: true }));
 const cleanup = {
   [`students/${studentId}`]: null, [`teachers/${teacherId}`]: null,
   [`avatars/students/${studentId}`]: null, [`avatars/teachers/${teacherId}`]: null,
@@ -49,25 +51,61 @@ const read = async (path) => (await get(ref(rtdb, `${RTDB_ROOT}/${path}`))).val(
     }
     assert.equal(checkQEBookingPrerequisite(dbStore.getStudentById(studentId), 'SW', []).canBook, false);
     const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF').toString('base64')}`;
-    for (const type of types) {
+    const orphan = `${prefix}-withdraw`;
+    await assert.rejects(update(ref(rtdb, RTDB_ROOT), { [`documentFiles/${orphan}`]: pdf }), /PERMISSION_DENIED/);
+    assert.equal(await read(`documentFiles/${orphan}`), null);
+    const withdrawInput = { id: orphan, studentId, studentUid: studentId, studentCode: prefix,
+      studentNameTh: 'Duo verification', projectTitle: 'Temporary withdrawal', docType: 'proposal',
+      fileName: 'withdraw.pdf', fileSize: 60, fileRef: `pdf://${orphan}`, advisorId: teacherId, advisorNameTh: 'Duo verification' };
+    await assert.rejects(update(ref(rtdb, RTDB_ROOT), { [`projectDocuments/${orphan}`]: { ...withdrawInput, status: 'submitted' } }), /PERMISSION_DENIED/);
+    assert.equal(await read(`projectDocuments/${orphan}`), null);
+    await dbStore.submitProjectDocument(withdrawInput, pdf);
+    assert.equal(await read(`documentFiles/${orphan}`), pdf);
+    await dbStore.withdrawProjectDocument(orphan);
+    assert.equal(await read(`projectDocuments/${orphan}`), null);
+    assert.equal(await read(`documentFiles/${orphan}`), null);
+    console.log('[PASS] deployed rules reject orphan bytes/broken metadata; paired submit and withdrawal work');
+    const bookingInput = { studentId, studentUid: studentId, studentCode: prefix, studentNameTh: 'Duo verification',
+      trackId: 'SW', roundId: 'DUO-VERIFY-ROUND', roundName: 'Temporary', examDate: '2026-09-10', timeSlot: '09:00 - 10:30',
+      room: 'Temporary', status: 'pending', examinerIds: ['A', 'B', 'C'], examinerNames: ['A', 'B', 'C'],
+      prerequisitePassed: true, submissionDate: '2026-09-07' };
+    for (const type of types.filter((type) => type !== 'withdraw')) {
       const id = `${prefix}-${type}`;
-      const fileRef = await uploadPdfDocument(id, pdf);
-      assert.equal(await read(`documentFiles/${id}`), pdf);
-      assert.equal(await resolvePdfDocument(fileRef), pdf);
+      const fileRef = `pdf://${id}`;
       await dbStore.submitProjectDocument({ id, studentId, studentUid: studentId, studentCode: prefix,
         studentNameTh: 'Duo verification', projectTitle: 'Temporary integration check', docType: type,
-        fileName: `${type}.pdf`, fileSize: 60, fileRef, advisorId: teacherId, advisorNameTh: 'Duo verification' });
+        fileName: `${type}.pdf`, fileSize: 60, fileRef, advisorId: teacherId, advisorNameTh: 'Duo verification' }, pdf);
+      assert.equal(await read(`documentFiles/${id}`), pdf);
+      assert.equal(await resolvePdfDocument(fileRef), pdf);
       assert.equal((await read(`projectDocuments/${id}`)).status, 'submitted');
       await dbStore.reviewProjectDocument(id, 'approved', teacher);
       assert.equal((await read(`projectDocuments/${id}`)).status, 'approved');
       console.log(`[PASS] live ${type} PDF upload, read-back, submission and review`);
       if (type === 'chapter3') {
         assert.equal((await read(`students/${studentId}`)).passed3Chapter, true);
+        const booking = await dbStore.createQEBooking(bookingInput);
+        cleanup[`qeBookings/${booking.id}`] = null;
+        assert.equal((await read(`qeBookings/${booking.id}`)).status, 'pending');
         await dbStore.reviewProjectDocument(id, 'rejected', teacher, 'Temporary revoke test');
         assert.equal((await read(`students/${studentId}`)).passed3Chapter, false);
+        assert.equal((await read(`qeBookings/${booking.id}`)).status, 'cancelled');
         assert.equal(checkQEBookingPrerequisite(dbStore.getStudentById(studentId), 'SW', dbStore.getProjectDocuments(studentId)).canBook, false);
+        await assert.rejects(dbStore.updateExaminerEvaluation(booking.id, scores), /ยกเลิก/);
+        const staleId = `${prefix}-STALE`;
+        cleanup[`qeBookings/${staleId}`] = null;
+        await assert.rejects(update(ref(rtdb, RTDB_ROOT), { [`qeBookings/${staleId}`]: { ...bookingInput, id: staleId } }), /PERMISSION_DENIED/);
+        assert.equal(await read(`qeBookings/${staleId}`), null);
         await dbStore.reviewProjectDocument(id, 'approved', teacher);
-        console.log('[PASS] live chapter3 approval/revocation updates QE prerequisite');
+        await assert.rejects(update(ref(rtdb, RTDB_ROOT), { [`qeBookings/${booking.id}`]: booking }), /PERMISSION_DENIED/);
+        assert.equal((await read(`qeBookings/${booking.id}`)).status, 'cancelled');
+        const fresh = await dbStore.createQEBooking(bookingInput);
+        cleanup[`qeBookings/${fresh.id}`] = null;
+        const result = await dbStore.updateExaminerEvaluation(fresh.id, scores);
+        cleanup[`qeResults/${result.id}`] = null;
+        assert.equal((await read(`qeResults/${result.id}`)).finalResult, 'passed');
+        assert.equal((await read(`qeBookings/${fresh.id}`)).status, 'evaluated');
+        assert.equal((await read(`students/${studentId}`)).passedQE, true);
+        console.log('[PASS] live QE booking, atomic revocation/cancellation, stale-write rule rejection, rebooking and atomic result');
       }
     }
   } finally {

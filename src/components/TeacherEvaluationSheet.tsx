@@ -60,6 +60,7 @@ export default function TeacherEvaluationSheet({
   );
   const [confirmed, setConfirmed] = useState<boolean>(false);
   const [saveError, setSaveError] = useState<string>("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (existingResult && existingResult.examinerScores?.length === 3) {
@@ -107,16 +108,24 @@ export default function TeacherEvaluationSheet({
     });
   };
 
-  const handleSaveEvaluation = () => {
+  const handleSaveEvaluation = async () => {
+    if (saving) return;
     setSaveError("");
     if (!confirmed) {
       setSaveError("กรุณาติ๊กยืนยันว่าคะแนนและมติของกรรมการทั้ง 3 ท่านถูกต้องก่อนประกาศผล");
       return;
     }
     const stamped = scores.map((s) => ({ ...s, evaluatedAt: new Date().toISOString(), signatureStatus: true }));
-    const savedResult = dbStore.updateExaminerEvaluation(booking.id, stamped);
-    onSaved(savedResult);
-    onClose();
+    setSaving(true);
+    try {
+      const savedResult = await dbStore.updateExaminerEvaluation(booking.id, stamped);
+      onSaved(savedResult);
+      onClose();
+    } catch (error: any) {
+      setSaveError(error?.message || "บันทึกผลสอบไม่สำเร็จ");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -371,10 +380,12 @@ export default function TeacherEvaluationSheet({
               <button
                 type="button"
                 onClick={handleSaveEvaluation}
+                disabled={saving}
+                aria-busy={saving}
                 className="px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold text-white bg-ssru-crimson hover:bg-ssru-600 active:scale-95 shadow-md shadow-ssru-crimson/20 flex items-center space-x-2 transition-all"
               >
                 <Save className="w-4 h-4" />
-                <span>บันทึกและประกาศผลสอบ</span>
+                <span>{saving ? "กำลังบันทึกผลสอบ..." : "บันทึกและประกาศผลสอบ"}</span>
               </button>
             </div>
           </div>

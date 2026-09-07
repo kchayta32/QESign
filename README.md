@@ -43,6 +43,8 @@
 
 ### 0. ระบบส่งเอกสารโครงงาน (Project Documents — PDF)
 - นักศึกษาส่งเอกสารเป็นไฟล์ **.pdf เท่านั้น** (ตรวจนามสกุล/MIME และส่วนหัว `%PDF-`, ขนาดไม่เกิน 5 MB) ตามลำดับ **Proposal → สอบ 3 บท → สอบ 5 บท** (ขั้นถัดไปเปิดให้ส่งเมื่อขั้นก่อนหน้าได้ผล "ผ่าน")
+- ไฟล์ PDF และ metadata บันทึก/ถอนด้วย atomic RTDB update เดียวเสมอ (Storage ใช้เฉพาะรูปโปรไฟล์และการเปิดไฟล์เก่า) เมื่อไม่ได้รับคำยืนยันภายใน 15 วินาทีจะแจ้งว่ายังไม่ยืนยัน ไม่แจ้งสำเร็จ; การส่งซ้ำในฟอร์มเดิมใช้รหัสเอกสารเดิม
+- การจอง QE และประกาศผลรอฐานข้อมูลยืนยัน; ผลสอบ สถานะการจอง และ `passedQE` บันทึกพร้อมกัน การเพิกถอนผลผ่าน 3 บทจะยกเลิกคำร้องที่ยังไม่ประเมิน และคำร้องที่ยกเลิกแล้วไม่สามารถนำมาประเมินซ้ำได้แม้คืนผลผ่าน 3 บท
 - อาจารย์ที่ปรึกษาเปิดไฟล์และบันทึกผล **ผ่าน / ไม่ผ่าน** (ต้องระบุข้อเสนอแนะเมื่อไม่ผ่าน) นักศึกษาส่งฉบับแก้ไขได้เป็นฉบับใหม่ (version +1) และยกเลิกฉบับที่ยังไม่ถูกตรวจได้
 - การบันทึกผล "ผ่าน" ให้เอกสาร **สอบ 3 บท** คือสิ่งที่ทำให้ `passed3Chapter = true` (และ "ยกเลิกผลผ่าน" จะคืนค่าเป็น `false`) ส่วน **สอบ 5 บท** จะตั้ง `passed5Chapter`
 
@@ -144,7 +146,10 @@ npm run reset:demo -- --all-transactions   # ล้างการจอง/ผ�
 - **Production**: https://qe-sign.vercel.app (Vercel project `qe-sign`, deploy ด้วย `vercel --prod`)
 - Vercel จะรัน `npm test`, `npm run typecheck`, `npm run build` ก่อน deploy; production ต้องใช้ `NEXT_PUBLIC_INCLUDE_DEMO_DATA=false` และ `NEXT_PUBLIC_FIREBASE_USE_STORAGE=false` จนกว่าจะเปิด bucket จริง
 - **Repository**: https://gitlab.com/kitti-group1/qe-ce-ssru
-- Realtime Database rules ที่แนะนำอยู่ใน `database.rules.json` (ปัจจุบันเปิด read/write สำหรับ `/ssru_ce` เนื่องจากยังไม่ได้เปิด Firebase Auth; ควรเพิ่มเงื่อนไข `auth != null` เมื่อเปิดใช้ Auth แล้ว)
+- Realtime Database validation/index rules อยู่ใน `database.rules.json` และ `firebase.json`; ฐานข้อมูล CE ROOM ใช้ร่วมกับแอปอื่น **อย่า deploy ไฟล์นี้ทับ rules ทั้งฐานโดยตรง** ใช้ `node scripts/deploy-database-rules.js` เพื่อตรวจ dry run แล้ว `node scripts/deploy-database-rules.js --confirm-live` เพื่อแทนที่เฉพาะ `/ssru_ce` โดยสำรอง rules เก่าและอ่านกลับยืนยันว่า rules ส่วนอื่นไม่เปลี่ยน
+- Deploy frontend รุ่น atomic-write ก่อน rules แล้วให้ผู้ใช้ reload; client เก่าที่ส่ง PDF กับ metadata แยกกันจะถูก validation ปฏิเสธ
+- **ข้อจำกัดด้านความปลอดภัยเดิม:** Firebase Auth ยังไม่ได้ใช้บังคับสิทธิ์ และ live database มี root read/write แบบเปิดอยู่ สคริปต์ข้างต้นรักษาสิทธิ์เดิมโดยไม่เพิ่มสิทธิ์ Rules ใหม่นี้ตรวจความสอดคล้องของข้อมูลเท่านั้น ไม่ใช่ authorization: client ยังแก้สถานะนักศึกษาได้ ต้องทำ Firebase Auth + role/ownership rules ทั้งฐานร่วมกับเจ้าของแอปอื่นก่อนถือว่าปลอดภัยสำหรับข้อมูลส่วนบุคคล
+- Regression tests ไม่เขียนข้อมูลจริง; live Firebase/browser smoke ใช้ fixture เฉพาะกิจและลบพร้อมอ่านกลับยืนยันทุก path โดย browser smoke ตรวจ upload/reload/withdraw PDF เพิ่มจาก first-profile ทั้งสองบทบาท
 
 ---
 

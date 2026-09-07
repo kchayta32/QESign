@@ -5,13 +5,22 @@
       ".write": true,
       "students": { ".indexOn": ["studentCode", "email", "advisorId"] },
       "teachers": { ".indexOn": ["teacherCode", "email"] },
-      "qeBookings": { ".indexOn": ["studentId", "roundId", "trackId", "status"] },
-      "qeResults": { ".indexOn": ["studentId", "bookingId"] },
+      "qeBookings": {
+        "$bookingId": {
+          ".validate": "newData.hasChildren(['studentId', 'status']) && (!data.exists() || data.child('status').val() !== 'cancelled' || newData.child('status').val() === 'cancelled') && (!data.exists() || newData.child('studentId').val() === data.child('studentId').val()) && (newData.child('status').val() === 'cancelled' || (newData.parent().parent().child('students').child(newData.child('studentId').val()).child('status').val() === 'active' && newData.parent().parent().child('students').child(newData.child('studentId').val()).child('passed3Chapter').val() === true))"
+        }, ".indexOn": ["studentId", "roundId", "trackId", "status"] },
+      "qeResults": {
+        "$resultId": {
+          ".validate": "newData.hasChildren(['studentId', 'bookingId', 'finalResult']) && newData.parent().parent().child('students').child(newData.child('studentId').val()).child('passed3Chapter').val() === true && newData.parent().parent().child('students').child(newData.child('studentId').val()).child('status').val() === 'active' && newData.parent().parent().child('qeBookings').child(newData.child('bookingId').val()).child('studentId').val() === newData.child('studentId').val() && newData.parent().parent().child('qeBookings').child(newData.child('bookingId').val()).child('status').val() === 'evaluated'"
+        }, ".indexOn": ["studentId", "bookingId"] },
       "advisorLogs": { ".indexOn": ["studentId", "advisorId", "status"] },
       "conferenceEvidence": { ".indexOn": ["studentId", "status"] },
-      "projectDocuments": { ".indexOn": ["studentId", "advisorId", "docType", "status"] },
+      "projectDocuments": {
+        "$docId": {
+          ".validate": "newData.hasChildren(['id', 'studentId', 'docType', 'status', 'fileRef']) && newData.child('id').val() === $docId && newData.parent().parent().child('students').child(newData.child('studentId').val()).exists() && (newData.child('docType').val() === 'proposal' || newData.child('docType').val() === 'chapter3' || newData.child('docType').val() === 'chapter5') && (newData.child('status').val() === 'submitted' || newData.child('status').val() === 'approved' || newData.child('status').val() === 'rejected') && newData.child('fileRef').val() === 'pdf://' + $docId && newData.parent().parent().child('documentFiles').child($docId).isString()"
+        }, ".indexOn": ["studentId", "advisorId", "docType", "status"] },
       "documentFiles": {
-        "$docId": { ".validate": "newData.isString() && newData.val().length <= 7500000" }
+        "$docId": { ".validate": "newData.isString() && newData.val().length <= 7500000 && newData.parent().parent().child('projectDocuments').child($docId).exists()" }
       },
       "avatars": {
         "$kind": {

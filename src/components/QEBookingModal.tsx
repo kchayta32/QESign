@@ -94,10 +94,10 @@ export default function QEBookingModal({
   else if (quotaFull) blockReason = `โควตาที่นั่งของแทร็ก ${currentTrack.code} เต็มแล้ว (${currentTrack.activeBookingsCount}/${currentTrack.quotaTotal})`;
   const canBook = blockReason === "";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError("");
-    if (!canBook || !currentRound) return;
+    if (isSubmitting || !canBook || !currentRound) return;
     if (dateOutOfRange) {
       setSubmitError(`กรุณาเลือกวันสอบระหว่าง ${currentRound.startDate} ถึง ${currentRound.endDate} (และไม่ย้อนหลัง)`);
       return;
@@ -125,7 +125,7 @@ export default function QEBookingModal({
       const [t1, t2, t3] = picked;
       const name = (t: typeof t1) => `${t.prefixTh}${t.firstNameTh} ${t.lastNameTh}`;
 
-      const newBooking = dbStore.createQEBooking({
+      const newBooking = await dbStore.createQEBooking({
         studentId: student.id,
         studentUid: student.uid,
         studentCode: student.studentCode,

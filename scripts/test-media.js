@@ -73,12 +73,32 @@ global.FileReader = class {
   const input = { id: 'TEST-DOC', studentId: student.id, studentCode: student.studentCode, studentUid: student.uid,
     studentNameTh: 'Test', projectTitle: 'Test', docType: 'proposal', fileName: 'test.pdf', fileSize: 20,
     fileRef: 'pdf://TEST-DOC', advisorId: 'T-108', advisorNameTh: 'Test' };
-  await assert.rejects(dbStore.submitProjectDocument(input), /PERMISSION_DENIED/);
+  const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n%%EOF').toString('base64')}`;
+  await assert.rejects(dbStore.submitProjectDocument(input), /ไฟล์ PDF/);
+  await assert.rejects(dbStore.submitProjectDocument(input, pdf), /PERMISSION_DENIED/);
   assert.equal(dbStore.getProjectDocuments(student.id).length, 0);
+  assert.deepEqual(Object.keys(lastChanges).sort(), ['documentFiles/TEST-DOC', 'projectDocuments/TEST-DOC']);
+  assert.equal(lastChanges['documentFiles/TEST-DOC'], pdf);
+  let acknowledgeDocument;
+  write = () => new Promise((resolve) => { acknowledgeDocument = resolve; });
+  const submission = dbStore.submitProjectDocument(input, pdf);
+  assert.equal(dbStore.getProjectDocuments(student.id).length, 0);
+  acknowledgeDocument();
+  const submitted = await submission;
   write = async () => {};
-  await dbStore.submitProjectDocument(input);
+  assert.deepEqual(await dbStore.submitProjectDocument(input, pdf), submitted);
+  assert.equal(dbStore.getProjectDocuments(student.id).length, 1, 'same-id retry does not add a version');
+  write = async () => { throw new Error('PERMISSION_DENIED'); };
+  await assert.rejects(dbStore.withdrawProjectDocument(input.id), /PERMISSION_DENIED/);
+  assert.equal(dbStore.getProjectDocuments(student.id).length, 1);
+  assert.deepEqual(lastChanges, { 'projectDocuments/TEST-DOC': null, 'documentFiles/TEST-DOC': null });
+  write = async () => {};
+  await dbStore.withdrawProjectDocument(input.id);
+  assert.equal(dbStore.getProjectDocuments(student.id).length, 0);
+  await dbStore.submitProjectDocument(input, pdf);
+  console.log('[PASS] PDF metadata/bytes submit and withdraw atomically; denied/pending writes preserve state; same-id retry is idempotent');
   await dbStore.reviewProjectDocument(input.id, 'approved', dbStore.getTeacherById('T-108'));
-  await dbStore.submitProjectDocument({ ...input, id: 'CH3', docType: 'chapter3' });
+  await dbStore.submitProjectDocument({ ...input, id: 'CH3', fileRef: 'pdf://CH3', docType: 'chapter3' }, pdf);
   write = async () => { throw new Error('PERMISSION_DENIED'); };
   await assert.rejects(dbStore.reviewProjectDocument('CH3', 'approved', dbStore.getTeacherById('T-108')), /PERMISSION_DENIED/);
   assert.equal(dbStore.getStudentById(student.id).passed3Chapter, false);
@@ -88,6 +108,58 @@ global.FileReader = class {
   assert.equal(lastChanges[`students/${student.id}/passed3Chapter`], true);
   assert.equal(lastChanges['projectDocuments/CH3'].status, 'approved');
   console.log('[PASS] chapter3 result and QE flag persist atomically; failed review never unlocks QE');
+
+  const bookingInput = { studentId: student.id, studentUid: student.uid, studentCode: student.studentCode,
+    studentNameTh: 'Test', trackId: 'SW', roundId: 'TEST-ROUND', roundName: 'Test', examDate: '2026-09-10',
+    timeSlot: '09:00 - 10:30', room: 'Test', status: 'pending', examinerIds: ['A', 'B', 'C'],
+    examinerNames: ['A', 'B', 'C'], prerequisitePassed: true, submissionDate: '2026-09-07' };
+  write = async () => { throw new Error('PERMISSION_DENIED'); };
+  await assert.rejects(dbStore.createQEBooking(bookingInput), /PERMISSION_DENIED/);
+  assert.equal(dbStore.getQEBookingsByStudent(student.id).length, 0);
+  let acknowledgeBooking;
+  write = () => new Promise((resolve) => { acknowledgeBooking = resolve; });
+  const bookingSave = dbStore.createQEBooking(bookingInput);
+  assert.equal(dbStore.getQEBookingsByStudent(student.id).length, 0);
+  acknowledgeBooking();
+  const booking = await bookingSave;
+  const scores = ['A', 'B', 'C'].map((id) => ({ examinerId: id, examinerName: id, score: 80,
+    isPass: true, comments: '', evaluatedAt: '', signatureStatus: true }));
+  write = async () => { throw new Error('PERMISSION_DENIED'); };
+  await assert.rejects(dbStore.updateExaminerEvaluation(booking.id, scores), /PERMISSION_DENIED/);
+  assert.equal(dbStore.getQEResultByStudent(student.id), undefined);
+  assert.equal(dbStore.getOpenQEBookingByStudent(student.id).status, 'pending');
+  assert.equal(dbStore.getStudentById(student.id).passedQE, false);
+  await assert.rejects(dbStore.reviewProjectDocument('CH3', 'rejected', dbStore.getTeacherById('T-108'), 'Revoke'), /PERMISSION_DENIED/);
+  assert.equal(dbStore.getStudentById(student.id).passed3Chapter, true);
+  assert.equal(dbStore.getOpenQEBookingByStudent(student.id).status, 'pending');
+  write = async () => {};
+  await dbStore.reviewProjectDocument('CH3', 'rejected', dbStore.getTeacherById('T-108'), 'Revoke');
+  assert.equal(lastChanges[`qeBookings/${booking.id}`].status, 'cancelled');
+  assert.equal(lastChanges[`students/${student.id}/passed3Chapter`], false);
+  await assert.rejects(dbStore.updateExaminerEvaluation(booking.id, scores), /ยกเลิก/);
+  await assert.rejects(dbStore.createQEBooking(bookingInput), /สอบ 3 บท/);
+  await dbStore.reviewProjectDocument('CH3', 'approved', dbStore.getTeacherById('T-108'));
+  await assert.rejects(dbStore.updateExaminerEvaluation(booking.id, scores), /ยกเลิก/);
+  const freshBooking = await dbStore.createQEBooking(bookingInput);
+  let acknowledgeResult;
+  write = () => new Promise((resolve) => { acknowledgeResult = resolve; });
+  const evaluationSave = dbStore.updateExaminerEvaluation(freshBooking.id, scores);
+  assert.equal(dbStore.getQEResultByStudent(student.id), undefined);
+  assert.equal(dbStore.getStudentById(student.id).passedQE, false);
+  assert.equal(lastChanges[`qeBookings/${freshBooking.id}`].status, 'evaluated');
+  assert.equal(lastChanges[`students/${student.id}/passedQE`], true);
+  assert.equal(Object.keys(lastChanges).length, 3);
+  acknowledgeResult();
+  const result = await evaluationSave;
+  assert.equal(dbStore.getQEResultByStudent(student.id).id, result.id);
+  assert.equal(dbStore.getStudentById(student.id).passedQE, true);
+  console.log('[PASS] QE booking/result wait for acknowledgement; revoke atomically cancels bookings and cancelled bookings cannot be evaluated after reapproval');
+
+  write = () => new Promise(() => {});
+  const timeoutStart = performance.now();
+  await assert.rejects(persistChanges({ 'projectDocuments/timeout': {} }), { code: 'WRITE_UNCONFIRMED' });
+  assert.ok(performance.now() - timeoutStart >= 14000, 'real persistence timeout exercised');
+  console.log('[PASS] stalled writes report WRITE_UNCONFIRMED, never success');
 
   const valid = new File(['%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF'], 'proposal.pdf', { type: 'application/pdf' });
   const prepared = await readPdfFile(valid);

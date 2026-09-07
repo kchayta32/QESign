@@ -7,7 +7,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { ref, get, update } = require('firebase/database');
+const { ref, get, update, query, orderByChild, equalTo } = require('firebase/database');
 const { rtdb } = require('../src/lib/firebase/config.ts');
 const { dbStore } = require('../src/lib/firebase/db.ts');
 const { persistChanges, RTDB_ROOT } = require('../src/lib/firebase/rtdb.ts');
@@ -97,11 +97,49 @@ let browser, socket, send;
       assert.ok(ms < 10000, 'profile save must not wait for Storage SDK retries');
       console.log(`[PASS] browser ${role} profile + resized image saved and cloud-confirmed in ${ms} ms`);
     }
+    await evaluate(`localStorage.setItem('SSRU_CE_AUTH_SESSION_V2', JSON.stringify(${JSON.stringify({ role: 'student', entityId: studentId })})); location.reload(); true`);
+    await until(`!!document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]')`);
+    await evaluate(`document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]').click(); true`);
+    await until("document.body.innerText.includes('เอกสารโครงงาน: Proposal')");
+    await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'ส่งเอกสาร (.pdf)').click(); true");
+    await until(`!!document.querySelector('input[type=file][accept=".pdf,application/pdf"]')`);
+    const pdfText = '%PDF-1.4\\n1 0 obj\\n<< /Type /Catalog >>\\nendobj\\n%%EOF';
+    await evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([${JSON.stringify(pdfText)}], 'browser-proposal.pdf', { type: 'application/pdf' }));
+      const input = document.querySelector('input[type=file][accept=".pdf,application/pdf"]');
+      input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    await until("document.body.innerText.includes('browser-proposal.pdf')");
+    await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('ส่งให้อาจารย์ที่ปรึกษาตรวจ')).click(); true");
+    await until("document.body.innerText.includes('เปิดไฟล์ PDF') && !document.body.innerText.includes('กำลังอัปโหลด') && !document.querySelector('input[accept=\".pdf,application/pdf\"]')");
+    const submissions = (await get(query(ref(rtdb, `${RTDB_ROOT}/projectDocuments`), orderByChild('studentId'), equalTo(studentId)))).val();
+    assert.equal(Object.keys(submissions || {}).length, 1);
+    const doc = Object.values(submissions)[0];
+    cleanup[`projectDocuments/${doc.id}`] = null;
+    cleanup[`documentFiles/${doc.id}`] = null;
+    assert.equal(doc.status, 'submitted');
+    assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/documentFiles/${doc.id}`))).val(), `data:application/pdf;base64,${Buffer.from(pdfText).toString('base64')}`);
+    await evaluate('location.reload(); true');
+    await until(`!!document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]')`);
+    await evaluate(`document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]').click(); true`);
+    await until("document.body.innerText.includes('browser-proposal.pdf')");
+    await evaluate(`document.querySelector('button[title="ยกเลิกการส่ง (ยังไม่ถูกตรวจ)"]').click(); true`);
+    await until("!document.body.innerText.includes('browser-proposal.pdf')");
+    assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/projectDocuments/${doc.id}`))).exists(), false);
+    assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/documentFiles/${doc.id}`))).exists(), false);
+    console.log('[PASS] production browser PDF selection, atomic upload, reload persistence and atomic withdrawal');
     assert.deepEqual(exceptions, [], 'uncaught browser exceptions');
     console.log('[PASS] no uncaught browser runtime exceptions');
   } finally {
     if (send) { try { await send('Browser.close'); } catch {} }
     socket?.close(); browser?.kill();
+    // Discover this fixture's submissions even when the UI assertion failed before read-back.
+    const remaining = (await get(query(ref(rtdb, `${RTDB_ROOT}/projectDocuments`), orderByChild('studentId'), equalTo(studentId)))).val();
+    for (const doc of Object.values(remaining || {})) {
+      cleanup[`projectDocuments/${doc.id}`] = null;
+      cleanup[`documentFiles/${doc.id}`] = null;
+    }
     await update(ref(rtdb, RTDB_ROOT), cleanup);
     for (const p of Object.keys(cleanup)) assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/${p}`))).exists(), false);
     console.log(`[PASS] browser fixtures removed and read-back verified (${prefix})`);

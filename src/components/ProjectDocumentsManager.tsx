@@ -10,7 +10,7 @@ import {
   hasPassed3ChapterExam,
   isDocumentStageApproved
 } from "@/lib/rules/engine";
-import { PDF_MAX_FILE_MB, deletePdfDocument, formatFileSize, openPdfDocument, readPdfFile, uploadPdfDocument } from "@/lib/media/pdf";
+import { PDF_MAX_FILE_MB, deletePdfDocument, formatFileSize, openPdfDocument, readPdfFile } from "@/lib/media/pdf";
 import { formatThaiDateTime } from "@/lib/utils";
 import {
   X,
@@ -393,20 +393,21 @@ function UploadForm({
   const [note, setNote] = useState("");
   const [uploading, setUploading] = useState(false);
   const [localError, setLocalError] = useState("");
+  const [docId] = useState(() => dbStore.newProjectDocumentId(stage.type));
+  const [unconfirmed, setUnconfirmed] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError("");
     if (!file) return setLocalError("กรุณาเลือกไฟล์ PDF");
     // Re-check on submit: the store may have changed while the form was open.
-    const pre = checkDocumentSubmissionPrerequisite(student, dbStore.getProjectDocuments(student.id), stage.type);
+    const pre = checkDocumentSubmissionPrerequisite(student, dbStore.getProjectDocuments(student.id).filter((d) => d.id !== docId), stage.type);
     if (!pre.canSubmit) return setLocalError(pre.reasonTh);
 
     setUploading(true);
     try {
       const prepared = await readPdfFile(file);
-      const docId = dbStore.newProjectDocumentId(stage.type);
-      const fileRef = await uploadPdfDocument(docId, prepared.dataUrl);
+      const fileRef = `pdf://${docId}`;
       await dbStore.submitProjectDocument({
         id: docId,
         studentId: student.id,
@@ -421,11 +422,15 @@ function UploadForm({
         studentNote: note.trim() || undefined,
         advisorId: student.advisorId || "",
         advisorNameTh: student.advisorId ? dbStore.getTeacherDisplayName(student.advisorId) : "ยังไม่ระบุ",
-      });
+      }, prepared.dataUrl);
       onError("");
       onDone();
     } catch (err: any) {
-      setLocalError(err?.message || "อัปโหลดเอกสารไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+      const pending = err?.code === "WRITE_UNCONFIRMED";
+      setUnconfirmed(pending);
+      setLocalError(pending
+        ? `ยังไม่ยืนยันรายการ ${docId} — ไฟล์และข้อมูลจะบันทึกพร้อมกันเมื่อเชื่อมต่อได้ กรุณาส่งซ้ำรายการเดิมหรือโหลดหน้าใหม่เมื่อออนไลน์ (อย่าสร้างรายการใหม่)`
+        : err?.message || "อัปโหลดเอกสารไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
     } finally {
       setUploading(false);
     }
@@ -451,8 +456,8 @@ function UploadForm({
         <input
           type="file"
           accept=".pdf,application/pdf"
-          className="hidden"
-          disabled={uploading}
+          className="sr-only"
+          disabled={uploading || unconfirmed}
           onChange={(e) => {
             setLocalError("");
             setFile(e.target.files?.[0] || null);

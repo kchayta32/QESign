@@ -31,6 +31,7 @@ const student = dbStore.updateStudentProfile("STD-66122519010", {
 });
 const S = () => dbStore.getStudentById(student.id);
 const docs = () => dbStore.getProjectDocuments(student.id);
+const pdf = `data:application/pdf;base64,${Buffer.from('%PDF-1.4\n%%EOF').toString('base64')}`;
 
 async function submit(type, fileName = `${type}.pdf`) {
   const id = dbStore.newProjectDocumentId(type);
@@ -47,7 +48,7 @@ async function submit(type, fileName = `${type}.pdf`) {
     fileRef: `pdf://${id}`,
     advisorId: advisor.id,
     advisorNameTh: "อ.กานต์ เจริญจิตร",
-  });
+  }, pdf);
 }
 
 console.log("=== Project documents & 3-chapter → QE gate ===");
@@ -117,7 +118,7 @@ const wId = dbStore.newProjectDocumentId("proposal");
 await dbStore.submitProjectDocument({
   id: wId, studentId: other.id, studentUid: other.uid, studentCode: other.studentCode, studentNameTh: "x", projectTitle: "x",
   docType: "proposal", fileName: "p.pdf", fileSize: 10, fileRef: `pdf://${wId}`, advisorId: advisor.id, advisorNameTh: "x",
-});
+}, pdf);
 check("withdraw removes an unreviewed submission", !!(await dbStore.withdrawProjectDocument(wId)) && dbStore.getProjectDocuments(other.id).length === 0);
 check("withdraw of a reviewed document is refused", (await dbStore.withdrawProjectDocument(c2.id)) === undefined && getLatestDocument(docs(), "chapter3").id === c2.id);
 
@@ -151,30 +152,30 @@ const mkBooking = (examDate) =>
     trackId: "SW", roundId: "ROUND-QE-2569-1", roundName: "QE", examDate, timeSlot: "09:00 - 10:30", room: "4731",
     status: "pending", examinerIds: swTrack.examinersDefault, examinerNames: ["a", "b", "c"], prerequisitePassed: true, submissionDate: examDate,
   });
-const b1 = mkBooking("2026-09-10");
+const b1 = await mkBooking("2026-09-10");
 check("open booking detected while pending", dbStore.getOpenQEBookingByStudent(student.id)?.id === b1.id);
 let duplicateBookingRejected = false;
-try { mkBooking("2026-09-11"); } catch { duplicateBookingRejected = true; }
+try { await mkBooking("2026-09-11"); } catch { duplicateBookingRejected = true; }
 check("store refuses a second open QE booking", duplicateBookingRejected);
 const fail = (id) => ({ examinerId: id, examinerName: id, score: 40, isPass: false, comments: "", evaluatedAt: "", signatureStatus: true });
 const pass = (id) => ({ examinerId: id, examinerName: id, score: 80, isPass: true, comments: "", evaluatedAt: "", signatureStatus: true });
-dbStore.updateExaminerEvaluation(b1.id, swTrack.examinersDefault.map(fail));
+await dbStore.updateExaminerEvaluation(b1.id, swTrack.examinersDefault.map(fail));
 check("no open booking after evaluation", dbStore.getOpenQEBookingByStudent(student.id) === undefined);
 check("failed attempt → passedQE=false", S().passedQE === false && dbStore.getQEResultByStudent(student.id).finalResult === "failed");
-const b2 = mkBooking("2026-10-10");
-dbStore.updateExaminerEvaluation(b2.id, swTrack.examinersDefault.map(pass));
+const b2 = await mkBooking("2026-10-10");
+await dbStore.updateExaminerEvaluation(b2.id, swTrack.examinersDefault.map(pass));
 check("passed result preferred over earlier failed one", dbStore.getQEResultByStudent(student.id).finalResult === "passed" && S().passedQE === true);
 check("student bookings sorted newest first", dbStore.getQEBookingsByStudent(student.id)[0].id === b2.id);
 
 // Re-evaluating an earlier failed attempt must not erase a subsequent pass.
-dbStore.updateExaminerEvaluation(b1.id, swTrack.examinersDefault.map(fail));
+await dbStore.updateExaminerEvaluation(b1.id, swTrack.examinersDefault.map(fail));
 check("earlier failed attempt cannot erase an existing QE pass", S().passedQE === true);
 let passedBookingRejected = false;
-try { mkBooking("2026-11-10"); } catch { passedBookingRejected = true; }
+try { await mkBooking("2026-11-10"); } catch { passedBookingRejected = true; }
 check("store refuses QE booking after passing", passedBookingRejected);
 const blockedStudent = dbStore.getStudentById("STD-66122519012");
 let prerequisiteRejected = false;
-try { dbStore.createQEBooking({ ...b1, studentId: blockedStudent.id, prerequisitePassed: true }); } catch { prerequisiteRejected = true; }
+try { await dbStore.createQEBooking({ ...b1, studentId: blockedStudent.id, prerequisitePassed: true }); } catch { prerequisiteRejected = true; }
 check("store rejects unqualified student despite forged prerequisitePassed input", prerequisiteRejected);
 
 console.log(failures === 0 ? "\n=== ALL PASSED ===" : `\n=== ${failures} FAILURE(S) ===`);
