@@ -1,21 +1,34 @@
 {
   "target": "https://qe-sign.vercel.app",
-  "deploymentId": "dpl_5YppNkH2wpv9jPciAHhcNQqdqBxq",
-  "sourceCommit": "75ba9ff1cf72a656f8ca2b705823d4fa3063f52d",
-  "startedAt": "2026-09-07T11:51:26.963Z",
+  "deploymentId": "dpl_DbpTkFps1A94Z1orEmnb6SKkGKwV",
+  "sourceCommit": "aa32d7ca43210bb1dbccc14b17d9328a88787274",
+  "startedAt": "2026-09-07T12:44:56.219Z",
   "checks": [
     "[PASS] hydrated production landing includes PDF workflow",
     "[PASS] 390px landing has no horizontal overflow",
-    "[PASS] browser student profile + resized image saved and cloud-confirmed in 404 ms",
-    "[PASS] browser teacher profile + resized image saved and cloud-confirmed in 420 ms",
+    "[PASS] student first-profile saves with both optional co-advisors blank; dropdowns have labels and identical advisor choices",
+    "[PASS] browser student profile + resized image saved and cloud-confirmed in 337 ms",
+    "[PASS] browser teacher profile + resized image saved and cloud-confirmed in 377 ms",
+    "[PASS] one co-advisor persists after browser save/reload while second remains optional",
+    "[PASS] both co-advisors persist after reload; profile dropdowns fit a 390px viewport",
+    "[PASS] second co-advisor sees synthetic student in the teacher dashboard without being primary/first advisor",
+    "[PASS] custom names required only for Other, trimmed and restored; either optional assignment can be cleared durably",
     "[PASS] production browser PDF selection, atomic upload, reload persistence and atomic withdrawal",
     "[PASS] no uncaught browser runtime exceptions",
-    "[PASS] browser fixtures removed and read-back verified (DUO-BROWSER-1788781886964)"
+    "[PASS] browser fixtures removed and read-back verified (DUO-BROWSER-1788785096220)"
   ],
   "screenshots": [
     {
+      "file": "production-co-advisors.png",
+      "sha256": "592ee4fe4b958fad11143e6a9a983d2184b4b2823d82de5c67b8f8186145a4d2"
+    },
+    {
+      "file": "production-co-advisors-mobile.png",
+      "sha256": "6cc1031150f257ac9c89053a1bee71b3aff1af3f26dac954d23806e8547c6822"
+    },
+    {
       "file": "production-pdf-submitted.png",
-      "sha256": "dfed4643d0ad1e6961b6b33384dcdcbcc31649c2f8cded62a1b47bcaca393ac4"
+      "sha256": "e7cb7f881816a8c9ce4740318aad5e96a32b6753d6bf31b7eb19dee1808c4180"
     }
   ],
   "assets": [
@@ -52,16 +65,16 @@
       "sha256": "2854a3465a7fff86e9bb3a3a1a7246415221776736b27307f7d8e8ca0e090b81"
     },
     {
-      "url": "https://qe-sign.vercel.app/_next/static/chunks/641-2de9a00d31a58480.js",
-      "sha256": "0e83b189b699c35c18d4b8266483e73edc7ce9fe6b689b3f39cf5f5b00c49ef4"
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/641-10e314132750c815.js",
+      "sha256": "4c67ab3fa8b1cd667159927e249746ae0f235f8ed2f522e6c63c64038dc28814"
     },
     {
-      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/page-82b8463336b9185b.js",
-      "sha256": "ce94bb26710eeb8f292be18f380dc783334a0e9d747242d87652e0540dd8b184"
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/page-d17a2ba526750544.js",
+      "sha256": "83ebfc1929f588bda10e98217d517f99975214fde293357ff90bcdac787068ba"
     },
     {
-      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/layout-677215c6f0fb0e51.js",
-      "sha256": "35470279904eda8b6cae06346b0842a2ea12abaae516f3379a03019a60d7224a"
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/layout-e606d2263d907fc3.js",
+      "sha256": "3fd512f0944a6e7434e13d19c73cab8d111b2bc62340991c19c6fb39b473d244"
     },
     {
       "url": "https://qe-sign.vercel.app/_next/static/chunks/polyfills-78c92fac7aa8fdd8.js",
@@ -69,20 +82,20 @@
     },
     {
       "url": "https://qe-sign.vercel.app/_next/static/chunks/webpack-32e44b8e05e24c54.js",
-      "sha256": "5539ace9d0ebb7853cb1323062ab0a09b6b70723646b147b3dbbd60c8eb8addd"
+      "sha256": "b7df0d9f283e31a92975e922a227051510cdb20560f903edbfc12313b4571ab7"
     }
   ],
   "cleanupVerified": true,
   "passed": true,
-  "vercelRequestId": "sin1::5t6l9-1788782050817-b793dedd1524",
-  "fixturePrefix": "DUO-BROWSER-1788781886964",
+  "vercelRequestId": "sin1::qdnzp-1788785259997-ec1c78b94f10",
+  "fixturePrefix": "DUO-BROWSER-1788785096220",
   "cleanupPaths": [
-    "students/DUO-BROWSER-1788781886964-STUDENT",
-    "teachers/DUO-BROWSER-1788781886964-TEACHER",
-    "avatars/students/DUO-BROWSER-1788781886964-STUDENT",
-    "avatars/teachers/DUO-BROWSER-1788781886964-TEACHER",
-    "projectDocuments/DOC-PROPOSAL-MTR6JXSN-WGXC",
-    "documentFiles/DOC-PROPOSAL-MTR6JXSN-WGXC"
+    "students/DUO-BROWSER-1788785096220-STUDENT",
+    "teachers/DUO-BROWSER-1788785096220-TEACHER",
+    "avatars/students/DUO-BROWSER-1788785096220-STUDENT",
+    "avatars/teachers/DUO-BROWSER-1788785096220-TEACHER",
+    "projectDocuments/DOC-PROPOSAL-MTR8GT7K-0KNY",
+    "documentFiles/DOC-PROPOSAL-MTR8GT7K-0KNY"
   ],
-  "finishedAt": "2026-09-07T11:51:34.283Z"
+  "finishedAt": "2026-09-07T12:45:07.400Z"
 }
