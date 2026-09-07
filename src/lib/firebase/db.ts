@@ -34,6 +34,7 @@ import {
   evaluateQEResult,
   calculateFinalExamEligibility,
   getLatestDocument,
+  isProjectAdvisor,
   isDocumentStageApproved,
   checkQEBookingPrerequisite,
   checkDocumentSubmissionPrerequisite
@@ -407,9 +408,15 @@ class AppDataStore {
     return getLatestDocument(this.getProjectDocuments(studentId), type);
   }
 
-  /** Documents waiting for a given advisor (or for everyone when no advisor is given). */
+  /** Shared queue for current main/co-advisors; any one review completes a submission. */
   public getPendingProjectDocuments(advisorId?: string): ProjectDocument[] {
-    return this.getProjectDocuments().filter((d) => d.status === "submitted" && (!advisorId || d.advisorId === advisorId));
+    return this.getProjectDocuments().filter((d) => {
+      if (d.status !== "submitted") return false;
+      if (advisorId === undefined) return true;
+      // Submission metadata is historical: assignments may change after upload.
+      const student = this.getStudentById(d.studentId);
+      return !!student && isProjectAdvisor(student, advisorId);
+    });
   }
 
   /** Id for a new document; generated before the PDF is uploaded so the file can be keyed by it. */

@@ -10,6 +10,7 @@ const {
   hasPassed3ChapterExam,
   getLatestDocument,
   PROJECT_DOCUMENT_STAGES,
+  isProjectAdvisor,
 } = require("../src/lib/rules/engine.ts");
 const { hasPdfSignature, formatFileSize, PDF_MAX_FILE_BYTES } = require("../src/lib/media/pdf.ts");
 
@@ -177,6 +178,77 @@ const blockedStudent = dbStore.getStudentById("STD-66122519012");
 let prerequisiteRejected = false;
 try { await dbStore.createQEBooking({ ...b1, studentId: blockedStudent.id, prerequisitePassed: true }); } catch { prerequisiteRejected = true; }
 check("store rejects unqualified student despite forged prerequisitePassed input", prerequisiteRejected);
+
+// Each advisor independently completes all three stages, with no second signature.
+const React = require("react");
+const { renderToStaticMarkup } = require("react-dom/server");
+const ProjectDocumentsManager = require("../src/components/ProjectDocumentsManager.tsx").default;
+const coAdvisors = dbStore.getTeachers().filter((t) => ![advisor.id, otherTeacher.id].includes(t.id)).slice(0, 2);
+const reviewers = [advisor, ...coAdvisors];
+const renderDocuments = (owner, role, teacher) => renderToStaticMarkup(React.createElement(ProjectDocumentsManager, {
+  student: owner, role, currentTeacher: teacher, isOpen: true, onClose() {},
+}));
+check("empty and missing advisor slots never match", !isProjectAdvisor({ advisorId: "" }, "") && !isProjectAdvisor({ advisorId: "" }, advisor.id));
+check("custom advisor does not match an unrelated account", !isProjectAdvisor({ advisorId: "CUSTOM-External" }, advisor.id));
+for (const [index, reviewer] of reviewers.entries()) {
+  const owner = dbStore.updateStudentProfile(`STD-661225190${13 + index}`, {
+    advisorId: advisor.id, coAdvisorId: coAdvisors[0].id, coAdvisor2Id: coAdvisors[1].id,
+    passed3Chapter: false, passed5Chapter: false, status: "active",
+  });
+  const current = () => dbStore.getStudentById(owner.id);
+  const ownerDocs = () => dbStore.getProjectDocuments(owner.id);
+  const queued = (id, teacher) => dbStore.getPendingProjectDocuments(teacher.id).some((d) => d.id === id);
+  for (const stage of PROJECT_DOCUMENT_STAGES) {
+    const label = `advisor slot ${index}: ${stage.type}`;
+    const send = () => {
+      const id = dbStore.newProjectDocumentId(stage.type);
+      return dbStore.submitProjectDocument({
+        id, studentId: owner.id, studentUid: owner.uid, studentCode: owner.studentCode,
+        studentNameTh: "ทดสอบที่ปรึกษาร่วม", projectTitle: "Test", docType: stage.type,
+        fileName: `${stage.type}.pdf`, fileSize: 1024, fileRef: `pdf://${id}`,
+        advisorId: advisor.id, advisorNameTh: "Main advisor",
+      }, pdf);
+    };
+    const draft = await send();
+    check(`${label} is in all three advisor queues`, reviewers.every((t) => queued(draft.id, t)));
+    check(`${label} is absent from unrelated and empty-id queues`, !queued(draft.id, otherTeacher) && !dbStore.getPendingProjectDocuments("").some((d) => d.id === draft.id));
+    check(`${label} unfiltered queue includes submission`, dbStore.getPendingProjectDocuments().some((d) => d.id === draft.id));
+    const html = renderDocuments(current(), "teacher", reviewer);
+    check(`${label} renders review controls and single-review guidance`, html.includes("<fieldset") && html.includes("ไม่ต้องรอครบทุกคน") && !html.includes("ท่านไม่ได้เป็นอาจารย์ที่ปรึกษา"));
+    for (const role of ["student", "admin"]) {
+      check(`${label} ${role} has no review controls`, !renderDocuments(current(), role, reviewer).includes("<fieldset"));
+    }
+    let missingFeedbackRejected = false;
+    try { await dbStore.reviewProjectDocument(draft.id, "rejected", reviewer, " "); } catch { missingFeedbackRejected = true; }
+    check(`${label} rejection requires feedback and leaves queues unchanged`, missingFeedbackRejected && reviewers.every((t) => queued(draft.id, t)));
+    await dbStore.reviewProjectDocument(draft.id, "rejected", reviewer, "แก้ไขเอกสาร");
+    check(`${label} one rejection removes from all queues and enables resubmission`, reviewers.every((t) => !queued(draft.id, t)) && checkDocumentSubmissionPrerequisite(current(), ownerDocs(), stage.type).canSubmit);
+    const revised = await send();
+    check(`${label} revised submission returns to all queues`, revised.version === 2 && reviewers.every((t) => queued(revised.id, t)));
+    const result = await dbStore.reviewProjectDocument(revised.id, "approved", reviewer, "ผ่านโดยผู้ตรวจคนเดียว");
+    check(`${label} one approval records actual reviewer and removes all pending entries`, result.status === "approved" && result.reviewerId === reviewer.id && result.reviewerName === `${reviewer.prefixTh}${reviewer.firstNameTh} ${reviewer.lastNameTh}` && !!result.reviewedAt && reviewers.every((t) => !queued(revised.id, t)));
+    check(`${label} approved UI shows actual reviewer without another review form`, renderDocuments(current(), "teacher", reviewer).includes(result.reviewerName) && !renderDocuments(current(), "teacher", reviewer).includes("<fieldset"));
+    if (stage.type === "proposal") check(`${label} opens Proposal Defense without unlocking QE`, checkDocumentSubmissionPrerequisite(current(), ownerDocs(), "chapter3").canSubmit && !checkQEBookingPrerequisite(current(), "SW", ownerDocs()).canBook);
+    if (stage.type === "chapter3") check(`${label} unlocks QE and Final Book`, current().passed3Chapter && checkQEBookingPrerequisite(current(), "SW", ownerDocs()).canBook && checkDocumentSubmissionPrerequisite(current(), ownerDocs(), "chapter5").canSubmit);
+    if (stage.type === "chapter5") check(`${label} marks Final Book passed`, current().passed5Chapter === true);
+  }
+}
+
+// Existing submissions follow reassignment, not the main-advisor snapshot at upload.
+const reassigned = dbStore.updateStudentProfile("STD-66122519016", { advisorId: advisor.id, coAdvisorId: "", coAdvisor2Id: "" });
+const reassignedId = dbStore.newProjectDocumentId("proposal");
+await dbStore.submitProjectDocument({
+  id: reassignedId, studentId: reassigned.id, studentUid: reassigned.uid, studentCode: reassigned.studentCode,
+  studentNameTh: "Reassignment", projectTitle: "Test", docType: "proposal", fileName: "proposal.pdf", fileSize: 1024,
+  fileRef: `pdf://${reassignedId}`, advisorId: advisor.id, advisorNameTh: "Old advisor",
+}, pdf);
+dbStore.updateStudentProfile(reassigned.id, { advisorId: otherTeacher.id, coAdvisor2Id: coAdvisors[1].id });
+check("reassignment removes old main advisor and includes new main and second co-advisor", !dbStore.getPendingProjectDocuments(advisor.id).some((d) => d.id === reassignedId) && [otherTeacher, coAdvisors[1]].every((t) => dbStore.getPendingProjectDocuments(t.id).some((d) => d.id === reassignedId)));
+dbStore.updateStudentProfile(reassigned.id, { coAdvisorId: coAdvisors[1].id });
+check("duplicate advisor slots do not duplicate queue entries", dbStore.getPendingProjectDocuments(coAdvisors[1].id).filter((d) => d.id === reassignedId).length === 1);
+dbStore.updateStudentProfile(reassigned.id, { coAdvisorId: "", coAdvisor2Id: "" });
+check("removing co-advisors removes pending entries", !dbStore.getPendingProjectDocuments(coAdvisors[1].id).some((d) => d.id === reassignedId));
+check("existing non-advisor committee review UI remains available", renderDocuments(dbStore.getStudentById(reassigned.id), "teacher", advisor).includes("<fieldset"));
 
 console.log(failures === 0 ? "\n=== ALL PASSED ===" : `\n=== ${failures} FAILURE(S) ===`);
 process.exit(failures === 0 ? 0 : 1);

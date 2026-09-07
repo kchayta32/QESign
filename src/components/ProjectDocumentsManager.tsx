@@ -8,6 +8,7 @@ import {
   checkDocumentSubmissionPrerequisite,
   getLatestDocument,
   hasPassed3ChapterExam,
+  isProjectAdvisor,
   isDocumentStageApproved
 } from "@/lib/rules/engine";
 import { PDF_MAX_FILE_MB, deletePdfDocument, formatFileSize, openPdfDocument, readPdfFile } from "@/lib/media/pdf";
@@ -63,7 +64,7 @@ export default function ProjectDocumentsManager({ student, currentTeacher, role,
 
   const passed3 = hasPassed3ChapterExam(liveStudent, documents);
   const pendingCount = documents.filter((d) => d.status === "submitted").length;
-  const isAdvisor = role === "teacher" && !!currentTeacher && (liveStudent.advisorId === currentTeacher.id || liveStudent.coAdvisorId === currentTeacher.id || liveStudent.coAdvisor2Id === currentTeacher.id);
+  const isAdvisor = role === "teacher" && !!currentTeacher && isProjectAdvisor(liveStudent, currentTeacher.id);
   const canReview = role === "teacher" && !!currentTeacher;
 
   return (
@@ -105,6 +106,10 @@ export default function ProjectDocumentsManager({ student, currentTeacher, role,
               <span className="px-3 py-1 rounded-xl text-xs font-bold bg-amber-200 text-amber-900 whitespace-nowrap">{pendingCount} ฉบับรอตรวจ</span>
             )}
           </div>
+
+          <p className="text-xs text-neutral-600">
+            Proposal, Proposal Defense และ Final Book: อาจารย์ที่ปรึกษาหลักหรือที่ปรึกษาร่วมคนใดคนหนึ่งตรวจและบันทึกผลได้ ไม่ต้องรอครบทุกคน
+          </p>
 
           {role === "teacher" && !isAdvisor && (
             <div className="p-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-2">

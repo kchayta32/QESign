@@ -54,6 +54,14 @@ export const PROJECT_DOCUMENT_STAGES: ProjectDocumentStage[] = [
   },
 ];
 
+/** Current main advisor or either optional co-advisor; empty ids are never assignments. */
+export function isProjectAdvisor(
+  student: Pick<Student, "advisorId" | "coAdvisorId" | "coAdvisor2Id">,
+  teacherId: string
+): boolean {
+  return !!teacherId && [student.advisorId, student.coAdvisorId, student.coAdvisor2Id].includes(teacherId);
+}
+
 export function getDocumentStage(type: ProjectDocumentType): ProjectDocumentStage {
   return PROJECT_DOCUMENT_STAGES.find((s) => s.type === type) || PROJECT_DOCUMENT_STAGES[0];
 }

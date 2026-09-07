@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { QEBooking, Student, ProjectDocumentType } from "@/types";
 import Avatar from "./Avatar";
-import { PROJECT_DOCUMENT_STAGES, getDocumentStage, getLatestDocument, hasPassed3ChapterExam } from "@/lib/rules/engine";
+import { PROJECT_DOCUMENT_STAGES, getDocumentStage, getLatestDocument, hasPassed3ChapterExam, isProjectAdvisor } from "@/lib/rules/engine";
 
 export default function TeacherDashboard() {
   const { currentTeacher, allStudents } = useAuth();
@@ -55,9 +55,7 @@ export default function TeacherDashboard() {
     });
   const awaitingCount = myBookings.filter((b) => b.status !== "evaluated").length;
 
-  const advisees = allStudents.filter(
-    (s) => s.advisorId === currentTeacher.id || s.coAdvisorId === currentTeacher.id || s.coAdvisor2Id === currentTeacher.id
-  );
+  const advisees = allStudents.filter((s) => isProjectAdvisor(s, currentTeacher.id));
 
   const q = searchQuery.trim().toLowerCase();
   const filteredAdvisees = advisees.filter(
@@ -69,9 +67,7 @@ export default function TeacherDashboard() {
   );
 
   // Documents submitted by my advisees that still need a result.
-  const pendingDocs = dbStore
-    .getPendingProjectDocuments()
-    .filter((d) => d.advisorId === currentTeacher.id || advisees.some((s) => s.id === d.studentId));
+  const pendingDocs = dbStore.getPendingProjectDocuments(currentTeacher.id);
 
   const openDocsFor = (student: Student, focus?: ProjectDocumentType) => setSelectedStudentForDocs({ student, focus });
 
