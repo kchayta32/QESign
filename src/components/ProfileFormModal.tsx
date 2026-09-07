@@ -226,7 +226,7 @@ function StudentProfileForm({
   onSubmit: (updates: Partial<Student>, newPassword?: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const teachers = dbStore.getTeachers();
-  const tracks = dbStore.getTracks();
+  const tracks = dbStore.getTracks().filter((track) => track.id !== "NW");
   const isPlaceholderName = !student.profileCompleted && student.firstNameTh === "นักศึกษา";
 
   const [prefixTh, setPrefixTh] = useState(student.prefixTh || "นาย");
@@ -235,12 +235,12 @@ function StudentProfileForm({
   const [firstNameEn, setFirstNameEn] = useState(student.firstNameEn || "");
   const [lastNameEn, setLastNameEn] = useState(student.lastNameEn || "");
   const [phone, setPhone] = useState(student.phone || "");
-  const [trackId, setTrackId] = useState<TrackType>(student.trackId || "SW");
+  const [trackId, setTrackId] = useState<TrackType | "">(student.trackId === "NW" ? "" : student.trackId || "SW");
   const [yearLevel, setYearLevel] = useState<number>(student.yearLevel || yearLevelFromCode(student.studentCode));
   const initialCustom = student.advisorId?.startsWith("CUSTOM-");
   const [advisorId, setAdvisorId] = useState<string>(initialCustom ? "OTHER" : student.advisorId || "");
   const [customAdvisor, setCustomAdvisor] = useState(initialCustom ? student.advisorId.replace("CUSTOM-", "") : "");
-  const [coAdvisors, setCoAdvisors] = useState(() => [student.coAdvisorId, student.coAdvisor2Id].map((id) => ({
+  const [coAdvisors, setCoAdvisors] = useState(() => [student.coAdvisorId, student.coAdvisor2Id, student.coAdvisor3Id].map((id) => ({
     id: id?.startsWith("CUSTOM-") ? "OTHER" : id || "",
     custom: id?.startsWith("CUSTOM-") ? id.slice("CUSTOM-".length) : "",
   })));
@@ -261,6 +261,7 @@ function StudentProfileForm({
     setError("");
     if (!firstNameTh.trim() || !lastNameTh.trim()) return setError("กรุณากรอกชื่อและนามสกุล (ภาษาไทย)");
     if (!phone.trim()) return setError("กรุณากรอกเบอร์โทรศัพท์ติดต่อ");
+    if (!trackId) return setError("กรุณาเลือกแทร็กความเชี่ยวชาญใหม่ (ยกเลิกแทร็ก NW แล้ว)");
     if (!advisorId) return setError("กรุณาเลือกอาจารย์ที่ปรึกษาโครงงาน");
     if (advisorId === "OTHER" && !customAdvisor.trim()) return setError("กรุณาระบุชื่ออาจารย์ที่ปรึกษา");
     const missingCoAdvisor = coAdvisors.findIndex((advisor) => advisor.id === "OTHER" && !advisor.custom.trim());
@@ -290,6 +291,7 @@ function StudentProfileForm({
           // Empty strings explicitly clear saved assignments; undefined would be omitted.
           coAdvisorId: coAdvisorIds[0],
           coAdvisor2Id: coAdvisorIds[1],
+          coAdvisor3Id: coAdvisorIds[2],
           projectTitleTh: projectTitleTh.trim(),
           projectTitleEn: projectTitleEn.trim(),
           avatarUrl: avatarUrl || "",
@@ -368,7 +370,8 @@ function StudentProfileForm({
           </div>
           <div>
             <label className={labelCls}>แทร็กความเชี่ยวชาญ *</label>
-            <select value={trackId} onChange={(e) => setTrackId(e.target.value as TrackType)} className={`${inputCls} font-bold text-ssru-crimson`}>
+            <select aria-label="แทร็กความเชี่ยวชาญ" value={trackId} onChange={(e) => setTrackId(e.target.value as TrackType)} required className={`${inputCls} font-bold text-ssru-crimson`}>
+              <option value="">— เลือกแทร็กความเชี่ยวชาญ —</option>
               {tracks.map((t) => (
                 <option key={t.id} value={t.id}>{t.code}: {t.nameTh}</option>
               ))}
@@ -404,7 +407,7 @@ function StudentProfileForm({
           {coAdvisors.map((advisor, index) => (
             <div key={index}>
               <label htmlFor={`co-advisor-${index + 1}`} className={labelCls}>
-                อาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ {index + 1} (ถ้ามี)
+                อาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ {index + 1}{index > 0 ? " (ถ้ามี)" : ""}
               </label>
               <select id={`co-advisor-${index + 1}`} value={advisor.id} onChange={(e) => updateCoAdvisor(index, { id: e.target.value })} className={inputCls}>
                 <option value="">— ไม่ระบุ —</option>

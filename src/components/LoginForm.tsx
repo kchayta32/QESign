@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { studentCodeFromEmail } from "@/lib/institution";
 import { GraduationCap, Users, ShieldCheck, LogIn, Eye, EyeOff, AlertCircle, Info } from "lucide-react";
 
 type LoginRole = "student" | "teacher" | "admin";
@@ -15,7 +16,7 @@ const ROLE_META: Record<LoginRole, { label: string; idLabel: string; placeholder
   student: {
     label: "นักศึกษา",
     idLabel: "รหัสนักศึกษา หรือ อีเมลมหาวิทยาลัย",
-    placeholder: "เช่น 66122519001 หรือ s66122519001@ssru.ac.th",
+    placeholder: "เช่น 66122519001 หรือ 66122519001@ssru.ac.th",
     Icon: GraduationCap,
   },
   teacher: {
@@ -55,7 +56,7 @@ export default function LoginForm({ onSuccess, compact = false }: LoginFormProps
       return;
     }
     setIsSubmitting(true);
-    const res = await login(identifier, password);
+    const res = await login(identifier, password, roleType);
     setIsSubmitting(false);
     if (!res.success) {
       setError(res.error || "เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูล");
@@ -83,7 +84,13 @@ export default function LoginForm({ onSuccess, compact = false }: LoginFormProps
               <button
                 key={r}
                 type="button"
+                aria-pressed={active}
                 onClick={() => {
+                  if (studentCodeFromEmail(identifier) && r !== "student") {
+                    setRoleType("student");
+                    setError("อีเมลรหัสนักศึกษา 11 หลัก @ssru.ac.th ต้องเลือกประเภทนักศึกษา");
+                    return;
+                  }
                   setRoleType(r);
                   setError("");
                 }}
@@ -110,7 +117,11 @@ export default function LoginForm({ onSuccess, compact = false }: LoginFormProps
           type="text"
           autoComplete="username"
           value={identifier}
-          onChange={(e) => setIdentifier(e.target.value)}
+          onChange={(e) => {
+            setIdentifier(e.target.value);
+            setError("");
+            if (studentCodeFromEmail(e.target.value)) setRoleType("student");
+          }}
           placeholder={meta.placeholder}
           className="w-full text-xs font-mono bg-white border border-neutral-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20"
         />

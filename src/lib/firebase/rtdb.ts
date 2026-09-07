@@ -10,7 +10,8 @@ import type {
   QEResult,
   AdvisorMeetingLog,
   ConferenceEvidence,
-  ProjectDocument
+  ProjectDocument,
+  ProjectGroup
 } from "@/types";
 
 export const RTDB_ROOT = "ssru_ce";
@@ -38,6 +39,7 @@ export interface SSRUCERealtimeState {
   advisorLogs: AdvisorMeetingLog[];
   conferenceEvidence: ConferenceEvidence[];
   projectDocuments: ProjectDocument[];
+  projectGroups: ProjectGroup[];
 }
 
 export type CollectionName = keyof SSRUCERealtimeState;
@@ -53,6 +55,7 @@ export const COLLECTION_NAMES: CollectionName[] = [
   "advisorLogs",
   "conferenceEvidence",
   "projectDocuments",
+  "projectGroups",
 ];
 
 /**

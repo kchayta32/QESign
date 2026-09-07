@@ -15,6 +15,11 @@ export function studentEmailFromCode(studentCode: string): string {
   return `s${studentCode.trim()}@${EMAIL_DOMAIN}`;
 }
 
+/** Recognise numeric student e-mails and the existing s-prefixed alias; never other domains. */
+export function studentCodeFromEmail(identifier: string): string | undefined {
+  return identifier.trim().match(/^s?(\d{11})@ssru\.ac\.th$/i)?.[1];
+}
+
 /** Current Thai academic year (B.E.). Academic year starts in June. */
 export function currentAcademicYearBE(now: Date = new Date()): number {
   const beYear = now.getFullYear() + 543;

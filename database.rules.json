@@ -26,8 +26,45 @@
       "conferenceEvidence": { ".indexOn": ["studentId", "status"] },
       "projectDocuments": {
         "$docId": {
-          ".validate": "newData.hasChildren(['id', 'studentId', 'docType', 'status', 'fileRef']) && newData.child('id').val() === $docId && newData.parent().parent().child('students').child(newData.child('studentId').val()).exists() && (newData.child('docType').val() === 'proposal' || newData.child('docType').val() === 'chapter3' || newData.child('docType').val() === 'chapter5') && (newData.child('status').val() === 'submitted' || newData.child('status').val() === 'approved' || newData.child('status').val() === 'rejected') && newData.child('fileRef').val() === 'pdf://' + $docId && newData.parent().parent().child('documentFiles').child($docId).isString()"
+          ".validate": "newData.hasChildren(['id', 'studentId', 'docType', 'status', 'fileRef']) && newData.child('id').val() === $docId && newData.parent().parent().child('students').child(newData.child('studentId').val()).exists() && (newData.child('docType').val() === 'proposal' || newData.child('docType').val() === 'chapter3' || newData.child('docType').val() === 'chapter5') && (newData.child('status').val() === 'submitted' || newData.child('status').val() === 'approved' || newData.child('status').val() === 'rejected') && newData.child('fileRef').val() === 'pdf://' + $docId && newData.parent().parent().child('documentFiles').child($docId).isString() && (!newData.child('groupId').exists() || (newData.child('memberIds').child(newData.child('studentId').val()).val() === true && newData.parent().parent().child('projectGroups').child(newData.child('groupId').val()).exists() && newData.parent().parent().child('documentSlots').child(newData.child('groupId').val() + '_' + newData.child('docType').val()).val() === $docId))",
+          "memberIds": {
+            "$studentId": {
+              ".validate": "newData.val() === true && newData.parent().parent().parent().parent().child('projectMemberships').child($studentId).val() === newData.parent().parent().child('groupId').val()"
+            }
+          },
+          "reviewAttachments": {
+            "$index": {
+              ".validate": "newData.hasChildren(['id', 'fileName', 'fileSize', 'mimeType']) && newData.child('fileSize').isNumber() && newData.child('fileSize').val() > 0 && newData.child('fileSize').val() <= 5242880 && (newData.child('mimeType').val() === 'application/pdf' || newData.child('mimeType').val() === 'image/png' || newData.child('mimeType').val() === 'image/jpeg' || newData.child('mimeType').val() === 'image/webp') && newData.parent().parent().parent().parent().child('reviewFiles').child($docId).child(newData.child('id').val()).isString()"
+            }
+          }
         }, ".indexOn": ["studentId", "advisorId", "docType", "status"] },
+      "projectGroups": {
+        "$groupId": {
+          ".validate": "newData.child('id').val() === $groupId && newData.child('members').hasChildren() && newData.child('memberKey').isString() && (!data.exists() || newData.child('memberKey').val() === data.child('memberKey').val())",
+          "members": {
+            "$studentId": {
+              ".validate": "newData.val() === true && newData.parent().parent().parent().parent().child('students').child($studentId).exists() && newData.parent().parent().parent().parent().child('projectMemberships').child($studentId).val() === $groupId"
+            }
+          }
+        }
+      },
+      "projectMemberships": {
+        "$studentId": {
+          ".validate": "newData.isString() && (!data.exists() || data.val() === newData.val()) && newData.parent().parent().child('projectGroups').child(newData.val()).child('members').child($studentId).val() === true"
+        }
+      },
+      "documentSlots": {
+        "$slotId": {
+          ".validate": "newData.isString() && newData.parent().parent().child('projectDocuments').child(newData.val()).child('groupId').val() + '_' + newData.parent().parent().child('projectDocuments').child(newData.val()).child('docType').val() === $slotId && (!data.exists() || newData.val() === data.val() || (root.child('ssru_ce/projectDocuments').child(data.val()).child('status').val() === 'rejected' && newData.parent().parent().child('projectDocuments').child(newData.val()).child('version').val() === root.child('ssru_ce/projectDocuments').child(data.val()).child('version').val() + 1))"
+        }
+      },
+      "reviewFiles": {
+        "$docId": {
+          "$fileId": {
+            ".validate": "newData.isString() && newData.val().length <= 7000000 && newData.parent().parent().parent().child('projectDocuments').child($docId).exists()"
+          }
+        }
+      },
       "documentFiles": {
         "$docId": { ".validate": "newData.isString() && newData.val().length <= 7500000 && newData.parent().parent().child('projectDocuments').child($docId).exists()" }
       },

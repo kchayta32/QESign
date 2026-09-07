@@ -102,7 +102,10 @@ global.FileReader = class {
   await assert.rejects(dbStore.submitProjectDocument(input), /ไฟล์ PDF/);
   await assert.rejects(dbStore.submitProjectDocument(input, pdf), /PERMISSION_DENIED/);
   assert.equal(dbStore.getProjectDocuments(student.id).length, 0);
-  assert.deepEqual(Object.keys(lastChanges).sort(), ['documentFiles/TEST-DOC', 'projectDocuments/TEST-DOC']);
+  assert.deepEqual(Object.keys(lastChanges).sort(), ['documentFiles/TEST-DOC', 'documentSlots/GROUP-STD-66122519020_proposal', 'projectDocuments/TEST-DOC', 'projectGroups/GROUP-STD-66122519020', 'projectMemberships/STD-66122519020']);
+  assert.deepEqual(lastChanges['projectGroups/GROUP-STD-66122519020'], { id: 'GROUP-STD-66122519020', memberKey: student.id, members: { [student.id]: true } });
+  assert.equal(lastChanges['projectMemberships/STD-66122519020'], 'GROUP-STD-66122519020');
+  assert.equal(lastChanges['documentSlots/GROUP-STD-66122519020_proposal'], input.id);
   assert.equal(lastChanges['documentFiles/TEST-DOC'], pdf);
   let acknowledgeDocument;
   write = () => new Promise((resolve) => { acknowledgeDocument = resolve; });
@@ -116,7 +119,7 @@ global.FileReader = class {
   write = async () => { throw new Error('PERMISSION_DENIED'); };
   await assert.rejects(dbStore.withdrawProjectDocument(input.id), /PERMISSION_DENIED/);
   assert.equal(dbStore.getProjectDocuments(student.id).length, 1);
-  assert.deepEqual(lastChanges, { 'projectDocuments/TEST-DOC': null, 'documentFiles/TEST-DOC': null });
+  assert.deepEqual(lastChanges, { 'projectDocuments/TEST-DOC': null, 'documentFiles/TEST-DOC': null, 'documentSlots/GROUP-STD-66122519020_proposal': null });
   write = async () => {};
   await dbStore.withdrawProjectDocument(input.id);
   assert.equal(dbStore.getProjectDocuments(student.id).length, 0);

@@ -18,6 +18,7 @@ import {
   Info
 } from "lucide-react";
 import { motion } from "framer-motion";
+import AutoGrowTextarea from "./AutoGrowTextarea";
 
 interface TeacherEvaluationSheetProps {
   booking: QEBooking;
@@ -331,11 +332,12 @@ export default function TeacherEvaluationSheet({
 
                       {/* Comments Input */}
                       <div className="md:col-span-3">
-                        <label className="block text-xs font-bold text-neutral-700 mb-1">
+                        <label htmlFor={`examiner-comment-${idx}`} className="block text-xs font-bold text-neutral-700 mb-1">
                           ข้อเสนอแนะและจุดที่ต้องปรับปรุง
                         </label>
-                        <input
-                          type="text"
+                        <AutoGrowTextarea
+                          id={`examiner-comment-${idx}`}
+                          rows={2}
                           value={item.comments}
                           onChange={(e) => handleCommentChange(idx, e.target.value)}
                           placeholder="กรอกข้อเสนอแนะสำหรับการปรับปรุงโครงงาน..."

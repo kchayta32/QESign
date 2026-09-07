@@ -11,7 +11,7 @@ import { auth } from "./config";
 import { dbStore, AccountKind } from "./db";
 import { isCloudDisabled } from "./rtdb";
 import { hashPassword, verifyPassword, validateNewPassword } from "@/lib/security/password";
-import { studentEmailFromCode } from "@/lib/institution";
+import { studentEmailFromCode, studentCodeFromEmail } from "@/lib/institution";
 import type { Student, Teacher, AdminAccount, AccountSecurity, UserRole } from "@/types";
 
 /**
@@ -92,6 +92,12 @@ export function resolveAccount(identifier: string): ResolvedAccount | undefined 
   const id = norm(identifier);
   if (!id) return undefined;
 
+  const emailCode = studentCodeFromEmail(id);
+  if (emailCode) {
+    const student = dbStore.getStudentById(emailCode);
+    return student ? toResolved("student", student) : undefined;
+  }
+
   const student = dbStore.getStudents().find(
     (s) =>
       norm(s.studentCode) === id ||
@@ -169,8 +175,11 @@ async function syncFirebaseAuth(account: ResolvedAccount, password: string): Pro
 /**
  * Login with student code / teacher code / e-mail + password.
  */
-export async function loginAccount(identifier: string, password: string): Promise<LoginResult> {
+export async function loginAccount(identifier: string, password: string, selectedRole?: UserRole): Promise<LoginResult> {
   try {
+    if (studentCodeFromEmail(identifier) && selectedRole && selectedRole !== "student") {
+      return { success: false, error: "อีเมลรหัสนักศึกษา 11 หลัก @ssru.ac.th ต้องเลือกประเภทนักศึกษา" };
+    }
     // Credentials live in the cloud records; never verify against seed/cached data alone
     // (otherwise a changed password could be bypassed with the default code on a fresh device).
     const synced = await dbStore.waitForCloudSync(["students", "teachers", "admins"]);
@@ -183,6 +192,9 @@ export async function loginAccount(identifier: string, password: string): Promis
 
     const account = resolveAccount(identifier);
     if (!account) return { success: false, error: GENERIC_LOGIN_ERROR };
+    if (selectedRole && selectedRole !== account.kind) {
+      return { success: false, error: "ประเภทผู้ใช้งานไม่ตรงกับบัญชี กรุณาเลือกประเภทผู้ใช้งานให้ถูกต้อง" };
+    }
 
     const ok = await verifyAccountPassword(account, password);
     if (!ok) return { success: false, error: GENERIC_LOGIN_ERROR };

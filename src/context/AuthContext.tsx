@@ -23,7 +23,7 @@ interface AuthContextType {
   allTeachers: Teacher[];
   /** Increments on every data-store change (cloud snapshot or local mutation) — use as a memo dependency. */
   dataVersion: number;
-  login: (identifier: string, password: string) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
+  login: (identifier: string, password: string, selectedRole?: UserRole) => Promise<{ success: boolean; role?: UserRole; error?: string }>;
   logout: () => Promise<void>;
   completeStudentProfile: (updates: Partial<Student>, newPassword?: string) => Promise<{ success: boolean; error?: string }>;
   completeTeacherProfile: (updates: Partial<Teacher>, newPassword?: string) => Promise<{ success: boolean; error?: string }>;
@@ -103,8 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     else localStorage.removeItem(AUTH_STORAGE_KEY);
   };
 
-  const login = useCallback(async (identifier: string, password: string) => {
-    const result = await loginAccount(identifier, password);
+  const login = useCallback(async (identifier: string, password: string, selectedRole?: UserRole) => {
+    const result = await loginAccount(identifier, password, selectedRole);
     if (!result.success || !result.role || !result.entityId) {
       return { success: false, error: result.error || "เข้าสู่ระบบไม่สำเร็จ" };
     }

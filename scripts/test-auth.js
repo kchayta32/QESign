@@ -39,6 +39,19 @@ const check = (name, ok, extra = "") => {
   check("resolve admin by code", resolveAccount("ceadmin")?.kind === "admin");
   check("unknown identifier not resolved", resolveAccount("99999999999") === undefined);
 
+  // Numeric student e-mail aliases and selected-role guards (before session creation).
+  const { studentCodeFromEmail } = require('../src/lib/institution.ts');
+  check('numeric student e-mail resolves existing roster account', resolveAccount(' 66122519001@SSRU.AC.TH ')?.id === 'STD-66122519001');
+  check('numeric e-mail login succeeds with student role', (await loginAccount('66122519001@ssru.ac.th', '66122519001', 'student')).success);
+  for (const role of ['teacher', 'admin']) {
+    check(`numeric student e-mail rejects ${role} selection`, !(await loginAccount('66122519001@ssru.ac.th', '66122519001', role)).success);
+  }
+  check('wrong domain and wrong digit count are not student e-mails', ['66122519001@example.com', '6612251900@ssru.ac.th', '661225190011@ssru.ac.th', '66122519001@ssru.ac.th.evil'].every((value) => studentCodeFromEmail(value) === undefined));
+  check('unregistered numeric e-mail cannot create a student', !(await loginAccount('99999999999@ssru.ac.th', '99999999999', 'student')).success);
+  check('student alias still checks password', !(await loginAccount('66122519001@ssru.ac.th', 'wrong', 'student')).success);
+  check('teacher account rejects student selection', !(await loginAccount('parinwat.th', 'parinwat.th', 'student')).success);
+  check('admin correct role still works', (await loginAccount('ceadmin', 'ceadmin', 'admin')).success);
+
   // Default password rule
   check("student default password = code", await verifyAccountPassword(resolveAccount("66122519001"), "66122519001"));
   check("student wrong password rejected", !(await verifyAccountPassword(resolveAccount("66122519001"), "66122519002")));

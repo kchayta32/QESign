@@ -48,6 +48,7 @@ export interface Student extends AccountSecurity {
   advisorId: string; // Teacher id, "CUSTOM-<name>" for an external advisor, or "" when unassigned
   coAdvisorId?: string; // Optional co-advisor 1; same id/CUSTOM-/empty convention as advisorId
   coAdvisor2Id?: string; // Optional co-advisor 2
+  coAdvisor3Id?: string; // Optional co-advisor 3
   projectTitleTh?: string;
   projectTitleEn?: string;
   passed3Chapter: boolean; // 3-chapter exam passed — set when the advisor approves the chapter3 document (QE prerequisite)
@@ -205,7 +206,23 @@ export type ProjectDocumentType = 'proposal' | 'chapter3' | 'chapter5';
 /** submitted = waiting for the advisor; approved = exam passed; rejected = failed / needs a new version. */
 export type ProjectDocumentStatus = 'submitted' | 'approved' | 'rejected';
 
+export interface ProjectGroup {
+  id: string;
+  memberKey: string; // Sorted ids; immutable roster identity for concurrent registration.
+  members: Record<string, true>; // Canonical student ids; frozen at first submission.
+}
+
+export interface ReviewAttachment {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: 'application/pdf' | 'image/png' | 'image/jpeg' | 'image/webp';
+}
+
 export interface ProjectDocument {
+  groupId?: string; // Missing on legacy individual submissions.
+  memberIds?: Record<string, true>;
+  reviewAttachments?: ReviewAttachment[];
   id: string;
   studentId: string;
   studentUid: string;

@@ -28,6 +28,7 @@ import type {
   FinalExamEligibility,
   ProjectDocument,
   ProjectDocumentType,
+  ProjectGroup,
   UserRole
 } from "@/types";
 import {
@@ -40,6 +41,7 @@ import {
   checkDocumentSubmissionPrerequisite
 } from "@/lib/rules/engine";
 import { db, auth } from "./config";
+import { PreparedReviewAttachment, REVIEW_MAX_FILES, validateReviewAttachment } from "@/lib/media/reviewAttachment";
 import {
   CollectionName,
   subscribeToCollection,
@@ -117,6 +119,8 @@ class AppDataStore {
   private advisorLogs: AdvisorMeetingLog[] = [...MOCK_ADVISOR_LOGS];
   private conferenceEvidence: ConferenceEvidence[] = [...MOCK_CONFERENCE_EVIDENCE];
   private projectDocuments: ProjectDocument[] = [];
+  private projectGroups: ProjectGroup[] = [];
+  private documentWrites = new Set<string>();
   private bookingWrites = new Set<string>();
 
   private listeners: Set<() => void> = new Set();
@@ -175,6 +179,10 @@ class AppDataStore {
       subscribeToCollection<ConferenceEvidence>("conferenceEvidence", (items, raw, exists) => {
         this.conferenceEvidence = items;
         this.afterCloudSnapshot("conferenceEvidence", this.conferenceEvidence, MOCK_CONFERENCE_EVIDENCE, items, raw, exists);
+      }),
+      subscribeToCollection<ProjectGroup>("projectGroups", (items, raw, exists) => {
+        this.projectGroups = items;
+        this.afterCloudSnapshot("projectGroups", this.projectGroups, [], items, raw, exists);
       }),
       subscribeToCollection<ProjectDocument>("projectDocuments", (items, raw, exists) => {
         this.projectDocuments = items;
@@ -265,6 +273,7 @@ class AppDataStore {
       if (Array.isArray(parsed.advisorLogs)) this.advisorLogs = parsed.advisorLogs;
       if (Array.isArray(parsed.conferenceEvidence)) this.conferenceEvidence = parsed.conferenceEvidence;
       if (Array.isArray(parsed.projectDocuments)) this.projectDocuments = parsed.projectDocuments;
+      if (Array.isArray(parsed.projectGroups)) this.projectGroups = parsed.projectGroups;
     } catch (e) {
       console.warn("Could not load cached data, using seed data:", e);
     }
@@ -282,6 +291,7 @@ class AppDataStore {
         advisorLogs: this.advisorLogs,
         conferenceEvidence: this.conferenceEvidence,
         projectDocuments: this.projectDocuments,
+        projectGroups: this.projectGroups,
       };
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
     } catch (e) {
@@ -397,9 +407,27 @@ class AppDataStore {
   // ---------------------------------------------------------------------------
   // Project documents (Proposal / สอบ 3 บท / สอบ 5 บท)
   // ---------------------------------------------------------------------------
+  public getProjectGroup(studentId: string): ProjectGroup | undefined {
+    const id = this.getStudentById(studentId)?.id || studentId;
+    return this.projectGroups.find((g) => g.members[id]);
+  }
+
+  public getProjectMembers(studentId: string): Student[] {
+    const student = this.getStudentById(studentId);
+    if (!student) return [];
+    const group = this.getProjectGroup(student.id);
+    return group ? Object.keys(group.members).map((id) => this.getStudentById(id)).filter((s): s is Student => !!s) : [student];
+  }
+
+  public getDocumentMembers(document: ProjectDocument): Student[] {
+    return Object.keys(document.memberIds || { [document.studentId]: true })
+      .map((id) => this.getStudentById(id)).filter((s): s is Student => !!s);
+  }
+
   public getProjectDocuments(studentId?: string): ProjectDocument[] {
-    const list = studentId
-      ? this.projectDocuments.filter((d) => d.studentId === studentId || d.studentCode === studentId)
+    const id = studentId ? this.getStudentById(studentId)?.id || studentId : undefined;
+    const list = id
+      ? this.projectDocuments.filter((d) => d.studentId === id || d.studentCode === id || d.memberIds?.[id])
       : this.projectDocuments;
     return [...list].sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || "") || b.id.localeCompare(a.id));
   }
@@ -414,8 +442,7 @@ class AppDataStore {
       if (d.status !== "submitted") return false;
       if (advisorId === undefined) return true;
       // Submission metadata is historical: assignments may change after upload.
-      const student = this.getStudentById(d.studentId);
-      return !!student && isProjectAdvisor(student, advisorId);
+      return this.getDocumentMembers(d).some((student) => isProjectAdvisor(student, advisorId));
     });
   }
 
@@ -548,35 +575,63 @@ class AppDataStore {
    * Retrying an unconfirmed submission reuses its id and version.
    */
   public async submitProjectDocument(
-    input: Omit<ProjectDocument, "version" | "status" | "submittedAt" | "reviewerId" | "reviewerName" | "reviewFeedback" | "reviewedAt">,
-    pdfDataUrl: string
+    input: Omit<ProjectDocument, "version" | "status" | "submittedAt" | "reviewerId" | "reviewerName" | "reviewFeedback" | "reviewedAt" | "reviewAttachments" | "groupId" | "memberIds">,
+    pdfDataUrl: string,
+    memberCodes?: string[]
   ): Promise<ProjectDocument> {
     const student = this.getStudentById(input.studentId);
     if (!student) throw new Error("ไม่พบนักศึกษา");
-    const existing = this.projectDocuments.find((d) => d.id === input.id);
-    // Retry an unconfirmed operation with the SAME id, version and payload reference.
-    if (existing && (existing.status !== "submitted" || existing.studentId !== input.studentId || existing.docType !== input.docType || existing.fileName !== input.fileName || existing.fileSize !== input.fileSize)) {
-      throw new Error("รายการนี้ถูกบันทึกหรือเปลี่ยนแปลงแล้ว กรุณาโหลดรายการใหม่");
+    if (typeof window !== "undefined" && !isCloudDisabled() && !["students", "projectDocuments", "projectGroups"].every((name) => this.isCloudSynced(name as CollectionName))) throw new Error("กำลังโหลดข้อมูลกลุ่มและเอกสาร กรุณาลองใหม่");
+    const savedGroup = this.getProjectGroup(student.id);
+    const members = memberCodes ? memberCodes.map((code) => {
+      const member = this.getStudentById(code.trim());
+      if (!member) throw new Error(`ไม่พบสมาชิก ${code} ในทะเบียนนักศึกษา`);
+      return member;
+    }) : this.getProjectMembers(student.id);
+    const ids = members.map((s) => s.id).sort();
+    if (!ids.includes(student.id)) throw new Error("ผู้ส่งต้องเป็นสมาชิกในกลุ่มโครงงาน");
+    if (new Set(ids).size !== ids.length) throw new Error("รายชื่อสมาชิกซ้ำกัน");
+    const sameMembers = (other: string[]) => [...other].sort().join(",") === ids.join(",");
+    const group: ProjectGroup = savedGroup || { id: `GROUP-${ids[0]}`, memberKey: ids.join(","), members: Object.fromEntries(ids.map((id) => [id, true as const])) };
+    if (!sameMembers(Object.keys(group.members))) throw new Error("ไม่สามารถเปลี่ยนสมาชิกหลังส่งเอกสารครั้งแรกได้");
+    for (const member of members) {
+      const assigned = this.getProjectGroup(member.id);
+      if (assigned && assigned.id !== group.id) throw new Error(`${member.studentCode} อยู่ในกลุ่มโครงงานอื่นแล้ว`);
+      const documents = this.getProjectDocuments(member.id);
+      if (documents.some((d) => !sameMembers(Object.keys(d.memberIds || { [d.studentId]: true })))) throw new Error(`${member.studentCode} มีประวัติเอกสารของกลุ่มอื่นแล้ว`);
+      const pre = checkDocumentSubmissionPrerequisite(member, documents.filter((d) => d.id !== input.id), input.docType);
+      if (!pre.canSubmit) throw new Error(`${member.studentCode}: ${pre.reasonTh}`);
     }
-    const prerequisite = checkDocumentSubmissionPrerequisite(student, this.getProjectDocuments(student.id).filter((d) => d.id !== input.id), input.docType);
-    if (!prerequisite.canSubmit) throw new Error(prerequisite.reasonTh);
+    const existing = this.projectDocuments.find((d) => d.id === input.id);
+    if (existing && (existing.status !== "submitted" || existing.studentId !== input.studentId || existing.docType !== input.docType || existing.fileName !== input.fileName || existing.fileSize !== input.fileSize || !sameMembers(Object.keys(existing.memberIds || { [existing.studentId]: true })))) throw new Error("รายการนี้ถูกบันทึกหรือเปลี่ยนแปลงแล้ว กรุณาโหลดรายการใหม่");
+    const slot = `${group.id}_${input.docType}`;
+    if (ids.some((id) => this.documentWrites.has(id))) throw new Error("กำลังบันทึกเอกสารของสมาชิกกลุ่มนี้ กรุณารอสักครู่");
     const doc: ProjectDocument = existing || {
-      ...input,
-      version: this.nextProjectDocumentVersion(input.studentId, input.docType),
-      status: "submitted",
-      submittedAt: new Date().toISOString(),
+      ...input, groupId: group.id, memberIds: group.members,
+      version: this.nextProjectDocumentVersion(student.id, input.docType),
+      status: "submitted", submittedAt: new Date().toISOString(),
     };
-    const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(doc.id)}`]: doc };
     if (typeof pdfDataUrl !== "string" || !pdfDataUrl.startsWith("data:application/pdf;base64,") || pdfDataUrl.length <= 28 || pdfDataUrl.length > 7_000_000) throw new Error("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกินกำหนด");
     if (doc.fileRef !== `pdf://${toSafeKey(doc.id)}`) throw new Error("การอ้างอิงไฟล์ไม่ตรงกับรายการส่ง");
-    changes[`documentFiles/${toSafeKey(doc.id)}`] = pdfDataUrl;
-    // Atomic metadata + bytes: rejected writes leave neither an orphan nor a broken link.
-    // On timeout both may still commit together; realtime snapshots reconcile the same id.
-    await persistChanges(changes);
-    this.projectDocuments = [doc, ...this.projectDocuments.filter((d) => d.id !== doc.id)];
-    mirrorToFirestore("project_documents", doc.id, doc);
-    this.commit();
-    return doc;
+    const changes: Record<string, unknown> = {
+      [`projectDocuments/${toSafeKey(doc.id)}`]: doc,
+      [`documentFiles/${toSafeKey(doc.id)}`]: pdfDataUrl,
+      [`documentSlots/${slot}`]: doc.id,
+    };
+    if (!savedGroup) {
+      changes[`projectGroups/${group.id}`] = group;
+      for (const id of ids) changes[`projectMemberships/${id}`] = group.id;
+    }
+    ids.forEach((id) => this.documentWrites.add(id));
+    try {
+      // Group, membership claims, stage slot, PDF and metadata commit together.
+      await persistChanges(changes);
+      this.projectGroups = [group, ...this.projectGroups.filter((g) => g.id !== group.id)];
+      this.projectDocuments = [doc, ...this.projectDocuments.filter((d) => d.id !== doc.id)];
+      mirrorToFirestore("project_documents", doc.id, doc);
+      this.commit();
+      return doc;
+    } finally { ids.forEach((id) => this.documentWrites.delete(id)); }
   }
 
   /** Student withdraws a submission that has not been reviewed yet. Returns the removed record. */
@@ -585,6 +640,7 @@ class AppDataStore {
     if (!doc || doc.status !== "submitted") return undefined;
     const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(docId)}`]: null };
     if (doc.fileRef.startsWith("pdf://")) changes[`documentFiles/${toSafeKey(docId)}`] = null;
+    if (doc.groupId) changes[`documentSlots/${doc.groupId}_${doc.docType}`] = null;
     await persistChanges(changes);
     this.projectDocuments = this.projectDocuments.filter((d) => d.id !== docId);
     this.commit();
@@ -600,44 +656,52 @@ class AppDataStore {
     docId: string,
     decision: "approved" | "rejected",
     reviewer: Teacher,
-    feedback?: string
+    feedback?: string,
+    attachments?: PreparedReviewAttachment[]
   ): Promise<ProjectDocument | undefined> {
     const doc = this.projectDocuments.find((d) => d.id === docId);
     if (!doc) return undefined;
     if (decision === "rejected" && !feedback?.trim()) throw new Error("กรุณาระบุเหตุผลที่ไม่ผ่าน");
+    if (attachments) {
+      if (attachments.length > REVIEW_MAX_FILES || new Set(attachments.map((file) => file.id)).size !== attachments.length) throw new Error("แนบไฟล์ได้ไม่เกิน 5 ไฟล์ และชื่ออ้างอิงต้องไม่ซ้ำ");
+      attachments.forEach(validateReviewAttachment);
+    }
     const updated: ProjectDocument = {
       ...doc,
       status: decision,
       reviewerId: reviewer.id,
       reviewerName: `${reviewer.prefixTh}${reviewer.firstNameTh} ${reviewer.lastNameTh}`,
       reviewFeedback: feedback?.trim() || undefined,
+      reviewAttachments: attachments ? attachments.map(({ dataUrl, ...metadata }) => metadata) : doc.reviewAttachments,
       reviewedAt: new Date().toISOString(),
     };
-    const student = this.getStudentById(doc.studentId);
-    const docs = this.getProjectDocuments(doc.studentId).map((d) => d.id === docId ? updated : d);
-    const flags: Partial<Student> = {};
-    if (doc.docType === "chapter3") flags.passed3Chapter = isDocumentStageApproved(docs, "chapter3");
-    if (doc.docType === "chapter5") flags.passed5Chapter = isDocumentStageApproved(docs, "chapter5");
-    // One atomic write: a failed review cannot leave an exam flag unlocked in the cloud.
+    const memberFlags = new Map<string, Partial<Student>>();
     const changes: Record<string, unknown> = { [`projectDocuments/${toSafeKey(docId)}`]: updated };
-    if (student) {
-      for (const [key, value] of Object.entries(flags)) changes[`students/${toSafeKey(student.id)}/${key}`] = value;
+    if (attachments) {
+      changes[`reviewFiles/${docId}`] = attachments.length ? Object.fromEntries(attachments.map((file) => [file.id, file.dataUrl])) : null;
     }
-    // A concurrent booking may not yet be visible in this reviewer's collection.
-    // Read its authoritative slot; the student validator rejects any later race that
-    // would leave an open booking behind, so the caller can safely retry the review.
-    const slotted = flags.passed3Chapter === false ? await readQEBookingSlot(doc.studentId) : undefined;
-    const candidates = this.getQEBookingsByStudent(doc.studentId).filter((b) => b.id !== slotted?.id);
-    if (slotted?.studentId === doc.studentId) candidates.push(slotted);
-    const cancelled = flags.passed3Chapter === false
-      ? candidates.filter((b) => b.status !== "evaluated" && b.status !== "cancelled")
-          .map((b) => ({ ...b, status: "cancelled" as const, notes: "ยกเลิกการจอง: ถูกเพิกถอนผลผ่านสอบ 3 บท" }))
-      : [];
+    const cancelled: QEBooking[] = [];
+    for (const student of this.getDocumentMembers(doc)) {
+      const docs = this.getProjectDocuments(student.id).map((d) => d.id === docId ? updated : d);
+      const flags: Partial<Student> = {};
+      if (doc.docType === "chapter3") flags.passed3Chapter = isDocumentStageApproved(docs, "chapter3");
+      if (doc.docType === "chapter5") flags.passed5Chapter = isDocumentStageApproved(docs, "chapter5");
+      memberFlags.set(student.id, flags);
+      for (const [key, value] of Object.entries(flags)) changes[`students/${toSafeKey(student.id)}/${key}`] = value;
+      if (flags.passed3Chapter === false) {
+        // Preserve the existing revocation race protection for EVERY group member.
+        const slotted = await readQEBookingSlot(student.id);
+        const candidates = this.getQEBookingsByStudent(student.id).filter((b) => b.id !== slotted?.id);
+        if (slotted?.studentId === student.id) candidates.push(slotted);
+        cancelled.push(...candidates.filter((b) => b.status !== "evaluated" && b.status !== "cancelled")
+          .map((b) => ({ ...b, status: "cancelled" as const, notes: "ยกเลิกการจอง: ถูกเพิกถอนผลผ่านสอบ 3 บท" })));
+      }
+    }
     for (const booking of cancelled) changes[`qeBookings/${toSafeKey(booking.id)}`] = booking;
     await persistChanges(changes);
     this.qeBookings = [...this.qeBookings.filter((b) => !cancelled.some((c) => c.id === b.id)), ...cancelled];
     this.projectDocuments = this.projectDocuments.map((d) => d.id === docId ? updated : d);
-    if (student) this.students = this.students.map((s) => s.id === student.id ? { ...s, ...flags } : s);
+    this.students = this.students.map((s) => memberFlags.has(s.id) ? { ...s, ...memberFlags.get(s.id) } : s);
     mirrorToFirestore("project_documents", docId, updated);
     this.commit();
     return updated;

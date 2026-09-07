@@ -30,6 +30,9 @@ import {
   Loader2
 } from "lucide-react";
 import { motion } from "framer-motion";
+import AutoGrowTextarea from "./AutoGrowTextarea";
+import ReviewAttachments from "./ReviewAttachments";
+import { readReviewAttachment, REVIEW_MAX_FILES } from "@/lib/media/reviewAttachment";
 
 interface ProjectDocumentsManagerProps {
   student: Student;
@@ -64,7 +67,8 @@ export default function ProjectDocumentsManager({ student, currentTeacher, role,
 
   const passed3 = hasPassed3ChapterExam(liveStudent, documents);
   const pendingCount = documents.filter((d) => d.status === "submitted").length;
-  const isAdvisor = role === "teacher" && !!currentTeacher && isProjectAdvisor(liveStudent, currentTeacher.id);
+  const members = dbStore.getProjectMembers(liveStudent.id);
+  const isAdvisor = role === "teacher" && !!currentTeacher && members.some((member) => isProjectAdvisor(member, currentTeacher.id));
   const canReview = role === "teacher" && !!currentTeacher;
 
   return (
@@ -117,6 +121,13 @@ export default function ProjectDocumentsManager({ student, currentTeacher, role,
               <span>ท่านไม่ได้เป็นอาจารย์ที่ปรึกษาของนักศึกษาคนนี้ — สามารถดูเอกสารได้ และบันทึกผลได้ในฐานะกรรมการ (ระบบจะบันทึกชื่อผู้ตรวจ)</span>
             </div>
           )}
+
+          <section className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-xs space-y-2">
+            <h4 className="font-bold">สมาชิกกลุ่มโครงงาน</h4>
+            <p>สมาชิกคนใดคนหนึ่งส่งแทนกลุ่มได้ทั้ง 3 ประเภท ทุกคนเห็นเอกสาร ผลตรวจ และประวัติแก้ไขเดียวกัน ไม่ต้องส่งซ้ำ</p>
+            <ul className="list-disc pl-5">{members.map((member) => <li key={member.id}>{member.studentCode} — {member.prefixTh} {member.firstNameTh} {member.lastNameTh}</li>)}</ul>
+            <p>{dbStore.getProjectGroup(liveStudent.id) ? "บันทึกสมาชิกแล้ว — ไม่สามารถเปลี่ยนรายชื่อหลังส่งครั้งแรก เพื่อคงประวัติและผลสอบของกลุ่ม" : "กรอกรหัสสมาชิกเพิ่มเติมในฟอร์มส่งเอกสารครั้งแรก หากทำคนเดียวให้เว้นว่าง"}</p>
+          </section>
 
           {/* Stages */}
           {PROJECT_DOCUMENT_STAGES.map((stage) => (
@@ -251,7 +262,8 @@ function StageCard({
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-neutral-charcoal truncate">{latest.fileName}</p>
                   <span className="text-[10px] text-neutral-400">
-                    {formatFileSize(latest.fileSize)} • ส่งเมื่อ {formatThaiDateTime(latest.submittedAt)}
+                    {formatFileSize(latest.fileSize)} • ส่งเมื่อ {formatThaiDateTime(latest.submittedAt)} • ผู้ส่ง: {latest.studentNameTh} ({latest.studentCode})
+                    <span className="block font-semibold">{latest.version === 1 ? "ส่งครั้งแรก (แก้ไข 0 ครั้ง)" : `แก้ไขครั้งที่ ${latest.version - 1}`}</span>
                   </span>
                 </div>
               </div>
@@ -283,11 +295,12 @@ function StageCard({
             {latest.status !== "submitted" && (
               <div className={`text-xs p-2.5 rounded-xl border flex items-start gap-2 ${latest.status === "approved" ? "bg-emerald-50 border-emerald-100 text-emerald-900" : "bg-red-50 border-red-100 text-red-900"}`}>
                 {latest.status === "approved" ? <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-emerald-600" /> : <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-red-600" />}
-                <div>
+                <div className="min-w-0 flex-1">
                   <span className="font-bold">{latest.status === "approved" ? "ผลสอบ: ผ่าน" : "ผลสอบ: ไม่ผ่าน"}</span>
                   {latest.reviewerName && <span> • บันทึกโดย {latest.reviewerName}</span>}
                   {latest.reviewedAt && <span> • {formatThaiDateTime(latest.reviewedAt)}</span>}
-                  {latest.reviewFeedback && <p className="mt-0.5">{latest.reviewFeedback}</p>}
+                  {latest.reviewFeedback && <p className="mt-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{latest.reviewFeedback}</p>}
+                  <ReviewAttachments document={latest} />
                 </div>
               </div>
             )}
@@ -360,10 +373,11 @@ function StageCard({
                   const m = statusMeta[d.status];
                   return (
                     <li key={d.id} className="text-[11px] p-2 rounded-lg bg-neutral-50 border border-neutral-100 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-neutral-600">
-                        ฉบับที่ {d.version} • {d.fileName} • {formatThaiDateTime(d.submittedAt)}
-                        {d.reviewFeedback ? ` • ${d.reviewFeedback}` : ""}
+                      <span className="text-neutral-600 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                        ฉบับที่ {d.version} • {d.version === 1 ? "ส่งครั้งแรก" : `แก้ไขครั้งที่ ${d.version - 1}`} • {d.fileName} • {formatThaiDateTime(d.submittedAt)} • ผู้ส่ง: {d.studentNameTh}
+                        {d.reviewFeedback ? `\n${d.reviewFeedback}` : ""}
                       </span>
+                      <ReviewAttachments document={d} />
                       <span className="flex items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-md font-bold ${m.cls}`}>{m.label}</span>
                         <button type="button" onClick={() => openFile(d)} className="text-ssru-crimson hover:underline">เปิด</button>
@@ -396,6 +410,8 @@ function UploadForm({
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [note, setNote] = useState("");
+  const group = dbStore.getProjectGroup(student.id);
+  const [memberCodes, setMemberCodes] = useState(() => dbStore.getProjectMembers(student.id).filter((member) => member.id !== student.id).map((member) => member.studentCode).join("\n"));
   const [uploading, setUploading] = useState(false);
   const [localError, setLocalError] = useState("");
   const [docId] = useState(() => dbStore.newProjectDocumentId(stage.type));
@@ -427,7 +443,7 @@ function UploadForm({
         studentNote: note.trim() || undefined,
         advisorId: student.advisorId || "",
         advisorNameTh: student.advisorId ? dbStore.getTeacherDisplayName(student.advisorId) : "ยังไม่ระบุ",
-      }, prepared.dataUrl);
+      }, prepared.dataUrl, group ? undefined : [student.studentCode, ...memberCodes.split(/[\s,;]+/).filter(Boolean)]);
       onError("");
       onDone();
     } catch (err: any) {
@@ -456,6 +472,12 @@ function UploadForm({
           <span>{localError}</span>
         </div>
       )}
+
+      <div className="space-y-1">
+        <label htmlFor={`members-${stage.type}`} className="block text-xs font-bold">รหัสสมาชิกกลุ่มเพิ่มเติม (ผู้ส่ง {student.studentCode} รวมอยู่แล้ว)</label>
+        <AutoGrowTextarea id={`members-${stage.type}`} rows={2} value={memberCodes} onChange={(event) => setMemberCodes(event.target.value)} disabled={!!group || uploading || unconfirmed} aria-describedby={`members-hint-${stage.type}`} className="w-full rounded-xl border border-neutral-300 p-2.5 text-xs" />
+        <p id={`members-hint-${stage.type}`} className="text-xs text-neutral-600">กรอกรหัสนักศึกษา 11 หลัก แยกด้วยบรรทัดใหม่หรือเครื่องหมายจุลภาค ระบบตรวจจากทะเบียนและล็อกสมาชิกหลังส่งครั้งแรก หากทำคนเดียวให้เว้นว่าง</p>
+      </div>
 
       <label className="block p-4 rounded-xl border-2 border-dashed border-neutral-300 bg-white hover:border-ssru-crimson/50 cursor-pointer text-center">
         <input
@@ -509,6 +531,8 @@ function UploadForm({
 // ---------------------------------------------------------------------------
 function ReviewActions({ doc, reviewer, stageLabel, onError }: { doc: ProjectDocument; reviewer: Teacher; stageLabel: string; onError: (message: string) => void }) {
   const [feedback, setFeedback] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [error, setError] = useState("");
 
   const [saving, setSaving] = useState(false);
@@ -527,8 +551,10 @@ function ReviewActions({ doc, reviewer, stageLabel, onError }: { doc: ProjectDoc
     if (!window.confirm(msg)) return;
     setSaving(true);
     try {
-      await dbStore.reviewProjectDocument(doc.id, decision, reviewer, feedback);
+      const attachments = await Promise.all(files.map((file, index) => readReviewAttachment(file, `attachment-${index}`)));
+      await dbStore.reviewProjectDocument(doc.id, decision, reviewer, feedback, attachments);
     } catch (error: any) {
+      setUnconfirmed(error?.code === "WRITE_UNCONFIRMED");
       // StageCard outlives this form when a later confirmed snapshot changes status.
       onError(error?.code === "WRITE_UNCONFIRMED"
         ? "ยังไม่ยืนยันผลจากฐานข้อมูล สถานะเดิมจะคงอยู่จนกว่าจะได้รับคำยืนยัน กรุณาตรวจสอบการเชื่อมต่อ"
@@ -542,13 +568,28 @@ function ReviewActions({ doc, reviewer, stageLabel, onError }: { doc: ProjectDoc
     <fieldset disabled={saving} aria-busy={saving} className="pt-2 border-t border-neutral-200 space-y-2">
       {saving && <p role="status" className="text-xs">กำลังบันทึกผล...</p>}
       {error && <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs">{error}</div>}
-      <textarea
+      <label htmlFor={`review-${doc.id}`} className="block text-xs font-bold">ข้อเสนอแนะของอาจารย์ / เหตุผล (จำเป็นเมื่อบันทึกผลไม่ผ่าน)</label>
+      <AutoGrowTextarea
+        id={`review-${doc.id}`}
         rows={2}
         value={feedback}
+        disabled={unconfirmed}
         onChange={(e) => setFeedback(e.target.value)}
-        placeholder="ข้อเสนอแนะของอาจารย์ / เหตุผล (จำเป็นเมื่อบันทึกผลไม่ผ่าน)"
-        className="w-full text-xs bg-white border border-neutral-300 rounded-xl p-2.5"
+        placeholder="พิมพ์ข้อเสนอแนะได้หลายบรรทัด ช่องจะขยายตามข้อความ"
+        className="w-full text-sm bg-white border border-neutral-300 rounded-xl p-2.5"
       />
+      <label htmlFor={`review-files-${doc.id}`} className="block text-xs font-bold">แนบรูปภาพหรือเอกสาร PDF ให้นักศึกษา</label>
+      <input id={`review-files-${doc.id}`} type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp" disabled={unconfirmed} aria-describedby={`review-files-hint-${doc.id}`} className="block w-full text-xs min-h-11" onChange={(event) => {
+        const selected = Array.from(event.target.files || []);
+        if (files.length + selected.length > REVIEW_MAX_FILES) setError(`แนบได้ไม่เกิน ${REVIEW_MAX_FILES} ไฟล์`);
+        else { setFiles((previous) => [...previous, ...selected]); setError(""); }
+        event.target.value = "";
+      }} />
+      <p id={`review-files-hint-${doc.id}`} className="text-xs text-neutral-600">PDF, PNG, JPEG, WebP ไม่เกิน 5 MB ต่อไฟล์ สูงสุด {REVIEW_MAX_FILES} ไฟล์ ข้อความไม่จำกัดจำนวนตัวอักษรในฟอร์ม</p>
+      <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-xs flex items-center gap-2">
+        <span className="break-all">{file.name} ({formatFileSize(file.size)})</span>
+        <button type="button" disabled={unconfirmed} aria-label={`ลบไฟล์แนบ ${file.name}`} className="min-h-11 px-3 text-red-700" onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>ลบ</button>
+      </li>)}</ul>
       <div className="flex items-center justify-end gap-2">
         <span className="text-xs text-neutral-400 mr-1">บันทึกผลสอบ {stageLabel}:</span>
         <button type="button" onClick={() => decide("rejected")} className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-red-700 bg-red-50 hover:bg-red-100 transition-colors flex items-center gap-1">

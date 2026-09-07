@@ -259,7 +259,7 @@ export default function StudentDashboard() {
                         <div key={idx} className="p-2 bg-white rounded-xl border border-emerald-100 text-xs flex items-center justify-between">
                           <div>
                             <span className="font-semibold text-neutral-700">{score.examinerName}</span>
-                            <p className="text-[11px] text-neutral-500 mt-0.5">{score.comments}</p>
+                            <p className="text-[11px] text-neutral-500 mt-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{score.comments}</p>
                           </div>
                           <div className="text-right flex-shrink-0 ml-3">
                             <span className="font-bold text-neutral-charcoal">{score.score} คะแนน</span>
