@@ -8,6 +8,7 @@ import TeacherEvaluationSheet from "./TeacherEvaluationSheet";
 import AdvisorLogsManager from "./AdvisorLogsManager";
 import ConferenceEvidenceManager from "./ConferenceEvidenceManager";
 import ProjectDocumentsManager from "./ProjectDocumentsManager";
+import TeacherExamSlotModal from "./TeacherExamSlotModal";
 import {
   Users,
   BookOpen,
@@ -19,9 +20,16 @@ import {
   Sparkles,
   Search,
   FolderOpen,
-  FileText
+  FileText,
+  Plus,
+  Trash2,
+  MapPin,
+  Cpu,
+  Code2,
+  Database,
+  FileCheck
 } from "lucide-react";
-import { QEBooking, Student, ProjectDocumentType } from "@/types";
+import { QEBooking, Student, ProjectDocumentType, ExamSlot } from "@/types";
 import Avatar from "./Avatar";
 import { PROJECT_DOCUMENT_STAGES, getDocumentStage, getLatestDocument, hasPassed3ChapterExam, isProjectAdvisor } from "@/lib/rules/engine";
 
@@ -32,6 +40,8 @@ export default function TeacherDashboard() {
   const [selectedStudentForLogs, setSelectedStudentForLogs] = useState<Student | null>(null);
   const [selectedStudentForConf, setSelectedStudentForConf] = useState<Student | null>(null);
   const [selectedStudentForDocs, setSelectedStudentForDocs] = useState<{ student: Student; focus?: ProjectDocumentType } | null>(null);
+  const [isExamSlotModalOpen, setIsExamSlotModalOpen] = useState(false);
+  const [showAllSlots, setShowAllSlots] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAllBookings, setShowAllBookings] = useState(false);
 
@@ -54,6 +64,20 @@ export default function TeacherDashboard() {
       return aDone - bDone || a.examDate.localeCompare(b.examDate);
     });
   const awaitingCount = myBookings.filter((b) => b.status !== "evaluated").length;
+
+  const allExamSlots = dbStore.getExamSlots().filter((s) => s.status !== "cancelled");
+  const myExamSlots = allExamSlots.filter((s) => s.teacherId === currentTeacher.id);
+  const visibleExamSlots = showAllSlots ? allExamSlots : myExamSlots;
+  const myOpenSlotsCount = myExamSlots.filter((s) => s.status === "open").length;
+
+  const handleCancelSlot = async (slotId: string) => {
+    if (!window.confirm("ต้องการยกเลิกรอบสอบนี้ใช่หรือไม่?")) return;
+    try {
+      await dbStore.cancelExamSlot(slotId, currentTeacher.id);
+    } catch (e: any) {
+      alert(e?.message || "ไม่สามารถยกเลิกได้");
+    }
+  };
 
   const advisees = allStudents.filter((s) => isProjectAdvisor(s, currentTeacher.id));
 
@@ -102,25 +126,40 @@ export default function TeacherDashboard() {
           </div>
 
           {/* Quick Metrics */}
-          <div className="flex items-center gap-3">
-            <div className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200 text-center min-w-[100px]">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200 text-center min-w-[90px]">
               <span className="text-neutral-400 text-xs block">นักศึกษาที่ปรึกษา</span>
               <span className="text-lg font-bold text-neutral-charcoal font-display">
                 {advisees.length} คน
               </span>
             </div>
-            <div className="p-3.5 rounded-2xl bg-ssru-50/50 border border-ssru-crimson/20 text-center min-w-[100px]">
-              <span className="text-ssru-crimson text-xs block font-semibold">รอประเมิน (ที่ท่านเป็นกรรมการ)</span>
+            <div className="p-3.5 rounded-2xl bg-ssru-50/50 border border-ssru-crimson/20 text-center min-w-[90px]">
+              <span className="text-ssru-crimson text-xs block font-semibold">รอประเมิน QE</span>
               <span className="text-lg font-bold text-ssru-crimson font-display">
                 {awaitingCount} รายการ
               </span>
             </div>
-            <div className={`p-3.5 rounded-2xl border text-center min-w-[100px] ${pendingDocs.length > 0 ? "bg-amber-50 border-amber-200" : "bg-neutral-50 border-neutral-200"}`}>
+            <div className={`p-3.5 rounded-2xl border text-center min-w-[90px] ${pendingDocs.length > 0 ? "bg-amber-50 border-amber-200" : "bg-neutral-50 border-neutral-200"}`}>
               <span className={`text-xs block font-semibold ${pendingDocs.length > 0 ? "text-amber-800" : "text-neutral-400"}`}>เอกสารรอตรวจ</span>
               <span className={`text-lg font-bold font-display ${pendingDocs.length > 0 ? "text-amber-900" : "text-neutral-charcoal"}`}>
                 {pendingDocs.length} ฉบับ
               </span>
             </div>
+            <div className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200 text-center min-w-[90px]">
+              <span className="text-neutral-400 text-xs block">รอบสอบเปิดรับ</span>
+              <span className="text-lg font-bold text-neutral-charcoal font-display">
+                {myOpenSlotsCount} รอบ
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsExamSlotModalOpen(true)}
+              className="px-4 py-3.5 bg-gradient-to-r from-ssru-crimson to-ssru-600 hover:from-ssru-600 hover:to-ssru-dark text-white rounded-2xl font-bold text-xs md:text-sm shadow-md shadow-ssru-crimson/20 flex items-center space-x-2 active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>เปิดรอบจองสอบ</span>
+            </button>
           </div>
         </div>
       </div>
@@ -160,6 +199,160 @@ export default function TeacherDashboard() {
           </div>
         </div>
       )}
+
+      {/* Section: Teacher Exam Slot Management (เปิดระบบจองสอบ QE & โครงงาน) */}
+      <div className="bg-white rounded-3xl p-6 shadow-soft border border-neutral-200">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-neutral-100">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xl bg-red-50 text-ssru-crimson">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-base font-bold font-display text-neutral-charcoal">
+                  ระบบเปิดรอบจองสอบ (QE &amp; โครงงาน)
+                </h3>
+                <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-ssru-50 text-ssru-crimson">
+                  {visibleExamSlots.length} รอบ
+                </span>
+              </div>
+              <p className="text-xs text-neutral-500">
+                อาจารย์สามารถเปิดช่วงเวลาสอบ QE (ฮาร์ตแวร์/ซอฟต์แวร์/ฐานข้อมูล) และการสอบโครงงาน พร้อมระบุสถานที่สอบเพื่อให้นักศึกษาเลือกจอง
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-neutral-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showAllSlots}
+                onChange={(e) => setShowAllSlots(e.target.checked)}
+                className="accent-ssru-crimson"
+              />
+              <span>แสดงรอบสอบของคณาจารย์ทุกคน</span>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setIsExamSlotModalOpen(true)}
+              className="px-4 py-2 bg-ssru-crimson hover:bg-ssru-600 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1.5 active:scale-95 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>เปิดรอบจองสอบใหม่</span>
+            </button>
+          </div>
+        </div>
+
+        {visibleExamSlots.length === 0 ? (
+          <div className="text-center py-10 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 space-y-2">
+            <Calendar className="w-8 h-8 text-neutral-400 mx-auto" />
+            <p className="font-semibold">ยังไม่มีรอบสอบที่ท่านเปิดไว้</p>
+            <p className="text-neutral-400">กดปุ่ม &quot;เปิดรอบจองสอบใหม่&quot; เพื่อกำหนดวัน เวลา สถานที่สอบ QE หรือสอบโครงงาน</p>
+            <button
+              type="button"
+              onClick={() => setIsExamSlotModalOpen(true)}
+              className="mt-1 px-4 py-2 rounded-xl bg-white border border-neutral-300 font-bold text-neutral-700 hover:bg-neutral-100 shadow-sm"
+            >
+              + เปิดรอบจองสอบตอนนี้
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleExamSlots.map((slot) => {
+              const isMine = slot.teacherId === currentTeacher.id;
+              const isBooked = slot.status === "booked";
+
+              return (
+                <div
+                  key={slot.id}
+                  className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
+                    isBooked
+                      ? "bg-blue-50/50 border-blue-200"
+                      : "bg-white border-neutral-200 hover:border-neutral-300 shadow-sm"
+                  }`}
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {slot.category === "QE" ? (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-red-100 text-ssru-crimson flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" />
+                            <span>QE {slot.qeType}</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-900 flex items-center gap-1">
+                            <BookOpen className="w-3 h-3" />
+                            <span>โครงงาน {slot.projectStage}</span>
+                          </span>
+                        )}
+                        <span className="text-[10px] text-neutral-400 font-mono">
+                          {slot.id.split("-")[1]}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          isBooked
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-emerald-100 text-emerald-800"
+                        }`}
+                      >
+                        {isBooked ? "มีผู้จองแล้ว" : "เปิดรับจอง"}
+                      </span>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-neutral-charcoal line-clamp-2">
+                      {slot.title}
+                    </h4>
+
+                    <div className="p-2.5 rounded-xl bg-neutral-50 border border-neutral-100 text-[11px] space-y-1">
+                      <div className="flex items-center text-neutral-600 gap-1">
+                        <Calendar className="w-3 h-3 text-ssru-crimson flex-shrink-0" />
+                        <span>{formatThaiDate(slot.examDate)}</span>
+                      </div>
+                      <div className="flex items-center text-neutral-600 gap-1">
+                        <Clock className="w-3 h-3 text-ssru-crimson flex-shrink-0" />
+                        <span className="font-semibold text-ssru-crimson">{slot.timeSlot} น.</span>
+                      </div>
+                      <div className="flex items-start text-neutral-600 gap-1">
+                        <MapPin className="w-3 h-3 text-ssru-crimson flex-shrink-0 mt-0.5" />
+                        <span className="font-medium break-words">{slot.location}</span>
+                      </div>
+                    </div>
+
+                    {isBooked && (
+                      <div className="p-2 rounded-xl bg-blue-100/70 text-blue-950 text-[11px] space-y-0.5">
+                        <span className="font-bold block">ผู้จองสอบ:</span>
+                        <p>{slot.bookedStudentName}</p>
+                        <p className="font-mono text-[10px] opacity-80">{slot.bookedStudentCode}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-[11px]">
+                    <span className="text-neutral-400 truncate max-w-[150px]" title={slot.teacherName}>
+                      โดย {slot.teacherName}
+                    </span>
+
+                    {isMine && !isBooked && (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelSlot(slot.id)}
+                        className="p-1 rounded-lg text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors flex items-center gap-1"
+                        title="ยกเลิกรอบสอบนี้"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>ยกเลิก</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Section 1: Pending QE Examinations & 3-Examiner Evaluation Sheet */}
       <div className="bg-white rounded-3xl p-6 shadow-soft border border-neutral-200">
@@ -513,6 +706,14 @@ export default function TeacherDashboard() {
           focusType={selectedStudentForDocs.focus}
           isOpen={!!selectedStudentForDocs}
           onClose={() => setSelectedStudentForDocs(null)}
+        />
+      )}
+
+      {isExamSlotModalOpen && (
+        <TeacherExamSlotModal
+          teacher={currentTeacher}
+          isOpen={isExamSlotModalOpen}
+          onClose={() => setIsExamSlotModalOpen(false)}
         />
       )}
     </div>

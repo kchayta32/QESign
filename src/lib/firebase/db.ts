@@ -5,6 +5,7 @@ import {
   MOCK_TEACHERS,
   MOCK_STUDENTS,
   MOCK_EXAM_ROUNDS,
+  MOCK_EXAM_SLOTS,
   MOCK_QE_BOOKINGS,
   MOCK_QE_RESULTS,
   MOCK_ADVISOR_LOGS,
@@ -20,6 +21,7 @@ import type {
   AdminAccount,
   AccountSecurity,
   ExamRound,
+  ExamSlot,
   QEBooking,
   QEResult,
   AdvisorMeetingLog,
@@ -29,6 +31,7 @@ import type {
   ProjectDocument,
   ProjectDocumentType,
   ProjectGroup,
+  TrackType,
   UserRole
 } from "@/types";
 import {
@@ -114,6 +117,7 @@ class AppDataStore {
   private students: Student[] = [...MOCK_STUDENTS];
   private admins: AdminAccount[] = [...SEED_ADMINS];
   private examRounds: ExamRound[] = [...MOCK_EXAM_ROUNDS];
+  private examSlots: ExamSlot[] = [...MOCK_EXAM_SLOTS];
   private qeBookings: QEBooking[] = [...MOCK_QE_BOOKINGS];
   private qeResults: QEResult[] = [...MOCK_QE_RESULTS];
   private advisorLogs: AdvisorMeetingLog[] = [...MOCK_ADVISOR_LOGS];
@@ -163,6 +167,10 @@ class AppDataStore {
       subscribeToCollection<AdminAccount>("admins", (items, raw, exists) => {
         this.admins = mergeRegistry(SEED_ADMINS, items);
         this.afterCloudSnapshot("admins", this.admins, SEED_ADMINS, items, raw, exists);
+      }),
+      subscribeToCollection<ExamSlot>("examSlots", (items, raw, exists) => {
+        this.examSlots = items;
+        this.afterCloudSnapshot("examSlots", this.examSlots, MOCK_EXAM_SLOTS, items, raw, exists);
       }),
       subscribeToCollection<QEBooking>("qeBookings", (items, raw, exists) => {
         this.qeBookings = items;
@@ -268,6 +276,7 @@ class AppDataStore {
       if (Array.isArray(parsed.teachers)) this.teachers = mergeRegistry(MOCK_TEACHERS, parsed.teachers);
       if (Array.isArray(parsed.students)) this.students = mergeRegistry(MOCK_STUDENTS, parsed.students);
       if (Array.isArray(parsed.admins)) this.admins = mergeRegistry(SEED_ADMINS, parsed.admins);
+      if (Array.isArray(parsed.examSlots)) this.examSlots = parsed.examSlots;
       if (Array.isArray(parsed.qeBookings)) this.qeBookings = parsed.qeBookings;
       if (Array.isArray(parsed.qeResults)) this.qeResults = parsed.qeResults;
       if (Array.isArray(parsed.advisorLogs)) this.advisorLogs = parsed.advisorLogs;
@@ -286,6 +295,7 @@ class AppDataStore {
         teachers: this.teachers,
         students: this.students,
         admins: this.admins,
+        examSlots: this.examSlots,
         qeBookings: this.qeBookings,
         qeResults: this.qeResults,
         advisorLogs: this.advisorLogs,
@@ -360,6 +370,22 @@ class AppDataStore {
 
   public getExamRounds(): ExamRound[] {
     return this.examRounds;
+  }
+
+  public getExamSlots(): ExamSlot[] {
+    return [...this.examSlots].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  }
+
+  public getOpenExamSlots(): ExamSlot[] {
+    return this.getExamSlots().filter((s) => s.status === "open");
+  }
+
+  public getExamSlotsByTeacher(teacherId: string): ExamSlot[] {
+    return this.getExamSlots().filter((s) => s.teacherId === teacherId);
+  }
+
+  public getExamSlotById(slotId: string): ExamSlot | undefined {
+    return this.examSlots.find((s) => s.id === slotId);
   }
 
   public getActiveRound(type: ExamRound["type"]): ExamRound | undefined {
@@ -867,6 +893,147 @@ class AppDataStore {
       void pushEntityToRTDB("conferenceEvidence", evidenceId, updatedEvidence);
       mirrorToFirestore("conference_evidence", evidenceId, updatedEvidence);
     }
+    this.commit();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Exam booking slots (Teacher open slots & Student booking)
+  // ---------------------------------------------------------------------------
+  public async createExamSlot(data: Omit<ExamSlot, "id" | "createdAt" | "status">): Promise<ExamSlot> {
+    if (!data.category) throw new Error("กรุณาระบุประเภทการสอบ");
+    if (data.category === "QE" && !data.qeType) throw new Error("กรุณาระบุประเภทการสอบ QE (ฮาร์ตแวร์, ซอฟต์แวร์, หรือระบบฐานข้อมูล)");
+    if (data.category === "PROJECT" && !data.projectStage) throw new Error("กรุณาระบุระดับการสอบโครงงาน (หัวข้อ, 3 บท, หรือ 5 บท)");
+    if (!data.examDate) throw new Error("กรุณาระบุวันที่ต้องการเข้าสอบ");
+    if (!data.timeSlot) throw new Error("กรุณาระบุช่วงเวลาสอบ");
+    if (!data.location?.trim()) throw new Error("กรุณากรอกสถานที่สอบ");
+
+    const newSlot: ExamSlot = {
+      ...data,
+      id: `SLOT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      status: "open",
+      capacity: data.capacity || 1,
+      createdAt: new Date().toISOString(),
+    };
+
+    await persistChanges({
+      [`examSlots/${toSafeKey(newSlot.id)}`]: newSlot,
+    });
+    this.examSlots = [newSlot, ...this.examSlots.filter((s) => s.id !== newSlot.id)];
+    mirrorToFirestore("exam_slots", newSlot.id, newSlot);
+    this.commit();
+    return newSlot;
+  }
+
+  public async bookExamSlot(
+    slotId: string,
+    student: Student,
+    notes?: string
+  ): Promise<{ slot: ExamSlot; booking?: QEBooking }> {
+    const slot = this.examSlots.find((s) => s.id === slotId);
+    if (!slot) throw new Error("ไม่พบรอบสอบที่ระบุ");
+    if (slot.status !== "open") throw new Error("รอบสอบนี้ถูกจองแล้วหรือปิดรับจองแล้ว");
+
+    const studentName = `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`.trim();
+
+    if (slot.category === "QE") {
+      const trackId = (slot.qeType as TrackType) || student.trackId || "SW";
+      const prerequisite = checkQEBookingPrerequisite(student, trackId, this.getProjectDocuments(student.id));
+      if (!prerequisite.canBook) throw new Error(prerequisite.reasonTh);
+      if (student.passedQE || this.getQEResultByStudent(student.id)?.finalResult === "passed") {
+        throw new Error("คุณผ่านการสอบ QE แล้ว ไม่จำเป็นต้องจองสอบอีก");
+      }
+      if (this.bookingWrites.has(student.id) || this.getOpenQEBookingByStudent(student.id)) {
+        throw new Error("คุณมีคำร้องจองสอบ QE ที่ยังไม่ได้รับการประเมินอยู่แล้ว");
+      }
+
+      const teachers = this.getTeachers().filter((t) => t.isCommittee);
+      const trackObj = this.getTracks().find((t) => t.id === trackId);
+      const defaultIds = trackObj?.examinersDefault || [];
+      const picked = defaultIds
+        .map((id) => teachers.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t);
+      for (const t of teachers) {
+        if (picked.length >= 3) break;
+        if (!picked.includes(t)) picked.push(t);
+      }
+      const [t1, t2, t3] = picked.length >= 3 ? picked : [teachers[0] || this.teachers[0], teachers[1] || this.teachers[1] || this.teachers[0], teachers[2] || this.teachers[2] || this.teachers[0]];
+      const name = (t: Teacher) => `${t.prefixTh}${t.firstNameTh} ${t.lastNameTh}`;
+
+      const currentRound = this.getActiveRound("QE") || this.examRounds[0];
+      const newBooking = await this.createQEBooking({
+        studentId: student.id,
+        studentUid: student.uid,
+        studentCode: student.studentCode,
+        studentNameTh: studentName,
+        trackId,
+        roundId: currentRound.id,
+        roundName: currentRound.titleTh,
+        examDate: slot.examDate,
+        timeSlot: slot.timeSlot,
+        room: slot.location,
+        status: "pending",
+        examinerIds: [t1.id, t2.id, t3.id],
+        examinerNames: [name(t1), name(t2), name(t3)],
+        prerequisitePassed: true,
+        submissionDate: new Date().toISOString().split("T")[0],
+        notes: notes || slot.notes,
+      });
+
+      const updatedSlot: ExamSlot = {
+        ...slot,
+        status: "booked",
+        bookedStudentId: student.id,
+        bookedStudentCode: student.studentCode,
+        bookedStudentName: studentName,
+        bookingId: newBooking.id,
+        notes: notes || slot.notes,
+      };
+
+      await persistChanges({
+        [`examSlots/${toSafeKey(slot.id)}`]: updatedSlot,
+      });
+      this.examSlots = this.examSlots.map((s) => (s.id === slot.id ? updatedSlot : s));
+      mirrorToFirestore("exam_slots", updatedSlot.id, updatedSlot);
+      this.commit();
+      return { slot: updatedSlot, booking: newBooking };
+    } else {
+      // PROJECT exam slot
+      if (student.status !== "active") throw new Error("นักศึกษาไม่อยู่ในสถานะที่สามารถจองสอบได้");
+
+      const updatedSlot: ExamSlot = {
+        ...slot,
+        status: "booked",
+        bookedStudentId: student.id,
+        bookedStudentCode: student.studentCode,
+        bookedStudentName: studentName,
+        notes: notes || slot.notes,
+      };
+
+      await persistChanges({
+        [`examSlots/${toSafeKey(slot.id)}`]: updatedSlot,
+      });
+      this.examSlots = this.examSlots.map((s) => (s.id === slot.id ? updatedSlot : s));
+      mirrorToFirestore("exam_slots", updatedSlot.id, updatedSlot);
+      this.commit();
+      return { slot: updatedSlot };
+    }
+  }
+
+  public async cancelExamSlot(slotId: string, teacherId?: string): Promise<void> {
+    const slot = this.examSlots.find((s) => s.id === slotId);
+    if (!slot) throw new Error("ไม่พบรอบสอบที่ต้องการยกเลิก");
+    if (teacherId && slot.teacherId !== teacherId) throw new Error("ไม่มีสิทธิ์ยกเลิกรอบสอบนี้");
+
+    if (slot.bookingId) {
+      this.cancelQEBooking(slot.bookingId);
+    }
+
+    const updatedSlot: ExamSlot = { ...slot, status: "cancelled" };
+    await persistChanges({
+      [`examSlots/${toSafeKey(slot.id)}`]: updatedSlot,
+    });
+    this.examSlots = this.examSlots.map((s) => (s.id === slot.id ? updatedSlot : s));
+    mirrorToFirestore("exam_slots", updatedSlot.id, updatedSlot);
     this.commit();
   }
 }

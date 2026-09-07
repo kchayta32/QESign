@@ -284,3 +284,30 @@ export interface ExamRound {
   availableRooms: string[];
   slotsPerDay: string[];
 }
+
+export type ExamCategory = 'QE' | 'PROJECT';
+export type QEExamType = 'HW' | 'SW' | 'DB'; // ฮาร์ตแวร์, ซอฟต์แวร์, ระบบฐานข้อมูล
+export type ProjectExamStage = 'proposal' | 'chapter3' | 'chapter5'; // สอบหัวข้อโครงงาน, สอบก้าวหน้า 3 บท, สอบป้องกัน 5 บท
+export type ExamSlotStatus = 'open' | 'booked' | 'cancelled';
+
+export interface ExamSlot {
+  id: string;
+  category: ExamCategory;
+  qeType?: QEExamType;
+  projectStage?: ProjectExamStage;
+  title: string;
+  examDate: string; // YYYY-MM-DD
+  timeSlot: string; // e.g. "09:00 - 10:30"
+  location: string; // Textbox input: e.g. "ห้องปฏิบัติการ 4731 (CE LAB)"
+  teacherId: string;
+  teacherName: string;
+  status: ExamSlotStatus;
+  capacity: number;
+  bookedStudentId?: string;
+  bookedStudentCode?: string;
+  bookedStudentName?: string;
+  bookingId?: string;
+  notes?: string;
+  createdAt: string;
+}
+

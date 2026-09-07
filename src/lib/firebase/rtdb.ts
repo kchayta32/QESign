@@ -6,6 +6,7 @@ import type {
   Student,
   AdminAccount,
   ExamRound,
+  ExamSlot,
   QEBooking,
   QEResult,
   AdvisorMeetingLog,
@@ -34,6 +35,7 @@ export interface SSRUCERealtimeState {
   students: Student[];
   admins: AdminAccount[];
   examRounds: ExamRound[];
+  examSlots: ExamSlot[];
   qeBookings: QEBooking[];
   qeResults: QEResult[];
   advisorLogs: AdvisorMeetingLog[];
@@ -50,6 +52,7 @@ export const COLLECTION_NAMES: CollectionName[] = [
   "students",
   "admins",
   "examRounds",
+  "examSlots",
   "qeBookings",
   "qeResults",
   "advisorLogs",

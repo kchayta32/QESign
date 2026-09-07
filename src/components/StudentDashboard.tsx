@@ -11,6 +11,7 @@ import AdvisorLogsManager from "./AdvisorLogsManager";
 import ConferenceEvidenceManager from "./ConferenceEvidenceManager";
 import ProjectDocumentsManager from "./ProjectDocumentsManager";
 import FinalCertificateModal from "./FinalCertificateModal";
+import AvailableExamSlotsList from "./AvailableExamSlotsList";
 import {
   Calendar,
   Users,
@@ -167,6 +168,12 @@ export default function StudentDashboard() {
         }}
         onOpenConference={() => setIsConferenceModalOpen(true)}
         onViewCertificate={() => setIsCertificateModalOpen(true)}
+      />
+
+      {/* Flagship: Available Exam Booking Slots opened by Teachers (QE & Projects) */}
+      <AvailableExamSlotsList
+        student={currentStudent}
+        onOpenDocuments={() => openDocuments("chapter3")}
       />
 
       {/* Grid of Sections: QE Booking Status & Quick Actions */}
