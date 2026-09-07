@@ -1,0 +1,15 @@
+[PASS] live student first-profile + avatar save/read-back: 75 ms
+[PASS] live teacher first-profile + avatar save/read-back: 71 ms
+[2026-09-07T11:52:14.388Z]  @firebase/database: FIREBASE WARNING: update at /ssru_ce failed: permission_denied 
+[2026-09-07T11:52:14.457Z]  @firebase/database: FIREBASE WARNING: update at /ssru_ce failed: permission_denied 
+[PASS] deployed rules reject orphan bytes/broken metadata; paired submit and withdrawal work
+[PASS] live proposal PDF upload, read-back, submission and review
+[PASS] live chapter3 PDF upload, read-back, submission and review
+[PASS] independent concurrent clients: one booking accepted, one rejected by database slot validation
+[2026-09-07T11:52:15.683Z]  @firebase/database: FIREBASE WARNING: update at /ssru_ce failed: permission_denied 
+[2026-09-07T11:52:15.786Z]  @firebase/database: FIREBASE WARNING: update at /ssru_ce failed: permission_denied 
+[2026-09-07T11:52:15.981Z]  @firebase/database: FIREBASE WARNING: update at /ssru_ce failed: permission_denied 
+[PASS] concurrent evaluations/retries share one stable result; alternate result identity rejected
+[PASS] live QE booking, atomic revocation/cancellation, stale-write rule rejection, rebooking and atomic result
+[PASS] live chapter5 PDF upload, read-back, submission and review
+[PASS] removed and verified all 20 temporary paths (DUO-VERIFY-1788781933914)

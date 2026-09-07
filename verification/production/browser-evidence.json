@@ -1,0 +1,88 @@
+{
+  "target": "https://qe-sign.vercel.app",
+  "deploymentId": "dpl_5YppNkH2wpv9jPciAHhcNQqdqBxq",
+  "sourceCommit": "75ba9ff1cf72a656f8ca2b705823d4fa3063f52d",
+  "startedAt": "2026-09-07T11:51:26.963Z",
+  "checks": [
+    "[PASS] hydrated production landing includes PDF workflow",
+    "[PASS] 390px landing has no horizontal overflow",
+    "[PASS] browser student profile + resized image saved and cloud-confirmed in 404 ms",
+    "[PASS] browser teacher profile + resized image saved and cloud-confirmed in 420 ms",
+    "[PASS] production browser PDF selection, atomic upload, reload persistence and atomic withdrawal",
+    "[PASS] no uncaught browser runtime exceptions",
+    "[PASS] browser fixtures removed and read-back verified (DUO-BROWSER-1788781886964)"
+  ],
+  "screenshots": [
+    {
+      "file": "production-pdf-submitted.png",
+      "sha256": "dfed4643d0ad1e6961b6b33384dcdcbcc31649c2f8cded62a1b47bcaca393ac4"
+    }
+  ],
+  "assets": [
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/fd9d1056-844a5cc198651369.js",
+      "sha256": "71ed963804cbd4b773b16a2e290fb534288140999cca4833a8ff300a9d72a9b1"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/23-c1b0cded1a0e1453.js",
+      "sha256": "433d1cc1d2d3382200a71f771aa921cc4a3e90294e56cdeda72776a023fc013d"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/main-app-f73cdb3bce740b12.js",
+      "sha256": "e70d963e7f59350b16dcba9796ad8aec2001738b6756509c4ea77e2bfb0921f0"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/bc9e92e6-00fa6dff557a324b.js",
+      "sha256": "ae717a25dce216a1ac4f0fa9c02e0939ddaaa953ccf701434ede379b4b9fb051"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/457b8330-eae110d9d9f80c77.js",
+      "sha256": "50e3cfecee9130cb59a7e9421059e684022739db0188c2ddbbdd0949dcd6a295"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/69806262-bd04b83da595ecda.js",
+      "sha256": "8d99f0fb4a1cb57c6fbbd5d0b19246162231e4894bd77d49e70b804c08ceb8b9"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/493-035a310265a44e2c.js",
+      "sha256": "a4088e8e9407c5ab220d06b9a6efd3d08f973dc28427685c3f437cb828109adc"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/209-263794e6e80410d9.js",
+      "sha256": "2854a3465a7fff86e9bb3a3a1a7246415221776736b27307f7d8e8ca0e090b81"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/641-2de9a00d31a58480.js",
+      "sha256": "0e83b189b699c35c18d4b8266483e73edc7ce9fe6b689b3f39cf5f5b00c49ef4"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/page-82b8463336b9185b.js",
+      "sha256": "ce94bb26710eeb8f292be18f380dc783334a0e9d747242d87652e0540dd8b184"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/app/layout-677215c6f0fb0e51.js",
+      "sha256": "35470279904eda8b6cae06346b0842a2ea12abaae516f3379a03019a60d7224a"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/polyfills-78c92fac7aa8fdd8.js",
+      "sha256": "e903cec1d59e0157bcc7e4ac883ae6f866babb60e4aa01b9485aa096b9722200"
+    },
+    {
+      "url": "https://qe-sign.vercel.app/_next/static/chunks/webpack-32e44b8e05e24c54.js",
+      "sha256": "5539ace9d0ebb7853cb1323062ab0a09b6b70723646b147b3dbbd60c8eb8addd"
+    }
+  ],
+  "cleanupVerified": true,
+  "passed": true,
+  "vercelRequestId": "sin1::5t6l9-1788782050817-b793dedd1524",
+  "fixturePrefix": "DUO-BROWSER-1788781886964",
+  "cleanupPaths": [
+    "students/DUO-BROWSER-1788781886964-STUDENT",
+    "teachers/DUO-BROWSER-1788781886964-TEACHER",
+    "avatars/students/DUO-BROWSER-1788781886964-STUDENT",
+    "avatars/teachers/DUO-BROWSER-1788781886964-TEACHER",
+    "projectDocuments/DOC-PROPOSAL-MTR6JXSN-WGXC",
+    "documentFiles/DOC-PROPOSAL-MTR6JXSN-WGXC"
+  ],
+  "finishedAt": "2026-09-07T11:51:34.283Z"
+}
