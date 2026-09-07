@@ -3,7 +3,7 @@
 // Usage: node -r ./scripts/register-ts.js scripts/smoke-firebase-documents.js --confirm-live
 if (!process.argv.includes('--confirm-live')) throw new Error('Requires --confirm-live');
 const assert = require('node:assert/strict');
-const { get, ref, update } = require('firebase/database');
+const { get, ref, update, query, orderByChild, equalTo } = require('firebase/database');
 const { rtdb } = require('../src/lib/firebase/config.ts');
 const { RTDB_ROOT, persistChanges } = require('../src/lib/firebase/rtdb.ts');
 const { dbStore } = require('../src/lib/firebase/db.ts');
@@ -18,6 +18,7 @@ const scores = ['A', 'B', 'C'].map((id) => ({ examinerId: id, examinerName: id, 
   isPass: true, comments: '', evaluatedAt: '', signatureStatus: true }));
 const cleanup = {
   [`students/${studentId}`]: null, [`teachers/${teacherId}`]: null,
+  [`qeBookingSlots/${studentId}`]: null,
   [`avatars/students/${studentId}`]: null, [`avatars/teachers/${teacherId}`]: null,
 };
 for (const type of types) {
@@ -83,6 +84,20 @@ const read = async (path) => (await get(ref(rtdb, `${RTDB_ROOT}/${path}`))).val(
       console.log(`[PASS] live ${type} PDF upload, read-back, submission and review`);
       if (type === 'chapter3') {
         assert.equal((await read(`students/${studentId}`)).passed3Chapter, true);
+        // Two independent REST clients race the same student's slot. Exactly one wins.
+        const candidates = ['A', 'B'].map((suffix) => ({ ...bookingInput, id: `${prefix}-RACE-${suffix}` }));
+        for (const candidate of candidates) cleanup[`qeBookings/${candidate.id}`] = null;
+        const baseUrl = rtdb.app.options.databaseURL;
+        const race = await Promise.all(candidates.map((candidate) => fetch(`${baseUrl}/${RTDB_ROOT}.json`, {
+          method: 'PATCH', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ [`qeBookings/${candidate.id}`]: candidate, [`qeBookingSlots/${studentId}`]: candidate.id }),
+        })));
+        assert.deepEqual(race.map((response) => response.status).sort(), [200, 401]);
+        const winner = candidates[race.findIndex((response) => response.status === 200)];
+        assert.equal(await read(`qeBookingSlots/${studentId}`), winner.id);
+        assert.equal(await read(`qeBookings/${candidates.find((candidate) => candidate.id !== winner.id).id}`), null);
+        await persistChanges({ [`qeBookings/${winner.id}/status`]: 'cancelled' });
+        console.log('[PASS] independent concurrent clients: one booking accepted, one rejected by database slot validation');
         const booking = await dbStore.createQEBooking(bookingInput);
         cleanup[`qeBookings/${booking.id}`] = null;
         assert.equal((await read(`qeBookings/${booking.id}`)).status, 'pending');
@@ -100,8 +115,27 @@ const read = async (path) => (await get(ref(rtdb, `${RTDB_ROOT}/${path}`))).val(
         assert.equal((await read(`qeBookings/${booking.id}`)).status, 'cancelled');
         const fresh = await dbStore.createQEBooking(bookingInput);
         cleanup[`qeBookings/${fresh.id}`] = null;
-        const result = await dbStore.updateExaminerEvaluation(fresh.id, scores);
+        const results = await Promise.all([dbStore.updateExaminerEvaluation(fresh.id, scores), dbStore.updateExaminerEvaluation(fresh.id, scores)]);
+        const result = results[0];
+        assert.equal(results[1].id, result.id);
         cleanup[`qeResults/${result.id}`] = null;
+        const replay = { [`qeResults/${result.id}`]: result,
+          [`qeBookings/${fresh.id}`]: { ...fresh, status: 'evaluated', resultId: result.id },
+          [`students/${studentId}/passedQE`]: true };
+        const evaluations = await Promise.all([1, 2].map(() => fetch(`${baseUrl}/${RTDB_ROOT}.json`, {
+          method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(replay),
+        })));
+        assert.ok(evaluations.every((response) => response.status === 200));
+        const duplicateResultId = `${prefix}-DUPLICATE-RESULT`;
+        cleanup[`qeResults/${duplicateResultId}`] = null;
+        await assert.rejects(update(ref(rtdb, RTDB_ROOT), {
+          [`qeResults/${duplicateResultId}`]: { ...result, id: duplicateResultId },
+          [`qeBookings/${fresh.id}/resultId`]: duplicateResultId,
+        }), /PERMISSION_DENIED/);
+        assert.equal(await read(`qeResults/${duplicateResultId}`), null);
+        const savedResults = (await get(query(ref(rtdb, `${RTDB_ROOT}/qeResults`), orderByChild('bookingId'), equalTo(fresh.id)))).val();
+        assert.deepEqual(Object.keys(savedResults), [result.id]);
+        console.log('[PASS] concurrent evaluations/retries share one stable result; alternate result identity rejected');
         assert.equal((await read(`qeResults/${result.id}`)).finalResult, 'passed');
         assert.equal((await read(`qeBookings/${fresh.id}`)).status, 'evaluated');
         assert.equal((await read(`students/${studentId}`)).passedQE, true);

@@ -115,6 +115,7 @@ class AppDataStore {
   private advisorLogs: AdvisorMeetingLog[] = [...MOCK_ADVISOR_LOGS];
   private conferenceEvidence: ConferenceEvidence[] = [...MOCK_CONFERENCE_EVIDENCE];
   private projectDocuments: ProjectDocument[] = [];
+  private bookingWrites = new Set<string>();
 
   private listeners: Set<() => void> = new Set();
   private cloudSynced: Partial<Record<CollectionName, boolean>> = {};
@@ -638,16 +639,26 @@ class AppDataStore {
     const prerequisite = checkQEBookingPrerequisite(student, booking.trackId, this.getProjectDocuments(student.id));
     if (!prerequisite.canBook) throw new Error(prerequisite.reasonTh);
     if (student.passedQE || this.getQEResultByStudent(student.id)?.finalResult === "passed") throw new Error("คุณผ่านการสอบ QE แล้ว");
-    if (this.getOpenQEBookingByStudent(student.id)) throw new Error("มีคำร้องจองสอบที่ยังไม่ได้ประเมินผลอยู่แล้ว");
+    if (this.bookingWrites.has(student.id) || this.getOpenQEBookingByStudent(student.id)) throw new Error("มีคำร้องจองสอบที่ยังไม่ได้ประเมินผลหรือกำลังบันทึกอยู่แล้ว");
     const newBooking: QEBooking = {
       ...booking,
       id: `BK-QE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8)}`,
     };
-    await persistChanges({ [`qeBookings/${toSafeKey(newBooking.id)}`]: newBooking });
-    this.qeBookings = [newBooking, ...this.qeBookings.filter((b) => b.id !== newBooking.id)];
-    mirrorToFirestore("qe_bookings", newBooking.id, newBooking);
-    this.commit();
-    return newBooking;
+    this.bookingWrites.add(student.id);
+    try {
+      // The slot validator is a server-side compare-and-set: a different booking can
+      // take this student's slot only after the previous booking is terminal.
+      await persistChanges({
+        [`qeBookings/${toSafeKey(newBooking.id)}`]: newBooking,
+        [`qeBookingSlots/${toSafeKey(student.id)}`]: newBooking.id,
+      });
+      this.qeBookings = [newBooking, ...this.qeBookings.filter((b) => b.id !== newBooking.id)];
+      mirrorToFirestore("qe_bookings", newBooking.id, newBooking);
+      this.commit();
+      return newBooking;
+    } finally {
+      this.bookingWrites.delete(student.id);
+    }
   }
 
   public cancelQEBooking(bookingId: string): QEBooking | undefined {
@@ -680,7 +691,7 @@ class AppDataStore {
 
     const existingIndex = this.qeResults.findIndex((r) => r.bookingId === bookingId);
     const newResult: QEResult = {
-      id: existingIndex >= 0 ? this.qeResults[existingIndex].id : `RES-QE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: booking.resultId || (existingIndex >= 0 ? this.qeResults[existingIndex].id : `RES-QE-${toSafeKey(bookingId)}`),
       bookingId,
       studentId: booking.studentId,
       studentCode: booking.studentCode,
@@ -696,7 +707,7 @@ class AppDataStore {
       announced: true,
     };
 
-    const updatedBooking: QEBooking = { ...booking, status: "evaluated" };
+    const updatedBooking: QEBooking = { ...booking, status: "evaluated", resultId: newResult.id };
     const results = [...this.qeResults.filter((r) => r.id !== newResult.id), newResult];
     const passedQE = results.some((r) => r.studentId === student.id && r.finalResult === "passed");
     await persistChanges({

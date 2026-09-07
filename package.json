@@ -17,7 +17,7 @@
     "probe:firebase": "node scripts/probe-firebase.js",
     "smoke:ssr": "node scripts/smoke-ssr.js",
     "verify:live": "node scripts/verify-live.js",
-    "test:documents": "node -r ./scripts/register-ts.js scripts/test-documents.js", "test:media": "node -r ./scripts/register-ts.js scripts/test-media.js"
+    "test:documents": "node -r ./scripts/register-ts.js scripts/test-documents.js", "test:media": "node -r ./scripts/register-ts.js scripts/test-media.js && node -r ./scripts/register-ts.js scripts/test-realtime.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

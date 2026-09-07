@@ -289,7 +289,7 @@ function StageCard({
 
             {/* Teacher review actions */}
             {canReview && reviewer && latest.status === "submitted" && (
-              <ReviewActions doc={latest} reviewer={reviewer} stageLabel={stage.shortTh} />
+              <ReviewActions doc={latest} reviewer={reviewer} stageLabel={stage.shortTh} onError={setError} />
             )}
             {canReview && reviewer && latest.status === "approved" && (
               <div className="flex justify-end pt-1">
@@ -502,13 +502,15 @@ function UploadForm({
 // ---------------------------------------------------------------------------
 // Review actions (teacher)
 // ---------------------------------------------------------------------------
-function ReviewActions({ doc, reviewer, stageLabel }: { doc: ProjectDocument; reviewer: Teacher; stageLabel: string }) {
+function ReviewActions({ doc, reviewer, stageLabel, onError }: { doc: ProjectDocument; reviewer: Teacher; stageLabel: string; onError: (message: string) => void }) {
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
 
   const [saving, setSaving] = useState(false);
   const decide = async (decision: "approved" | "rejected") => {
+    if (saving) return;
     setError("");
+    onError("");
     if (decision === "rejected" && !feedback.trim()) {
       setError("กรุณาระบุข้อเสนอแนะ / เหตุผลที่ไม่ผ่าน เพื่อให้นักศึกษาแก้ไข");
       return;
@@ -522,7 +524,10 @@ function ReviewActions({ doc, reviewer, stageLabel }: { doc: ProjectDocument; re
     try {
       await dbStore.reviewProjectDocument(doc.id, decision, reviewer, feedback);
     } catch (error: any) {
-      setError(error?.message || "บันทึกผลไม่สำเร็จ");
+      // StageCard outlives this form when a later confirmed snapshot changes status.
+      onError(error?.code === "WRITE_UNCONFIRMED"
+        ? "ยังไม่ยืนยันผลจากฐานข้อมูล สถานะเดิมจะคงอยู่จนกว่าจะได้รับคำยืนยัน กรุณาตรวจสอบการเชื่อมต่อ"
+        : error?.message || "บันทึกผลไม่สำเร็จ");
     } finally {
       setSaving(false);
     }

@@ -97,9 +97,27 @@ export function toKeyedMap<T extends { id: string }>(items: T[]): Record<string,
   return map;
 }
 
+// Firebase emits optimistic local onValue events before update() is acknowledged.
+// Keep affected records at their last published values until the actual write settles,
+// even if the caller's UI timeout has already elapsed. Other clients' records stay live.
+const pendingRecords = new Map<string, number>();
+const snapshotPublishers = new Set<() => void>();
+
+function holdRecords(changes: Record<string, unknown>): () => void {
+  const keys = Array.from(new Set(Object.keys(changes).map((path) => path.split('/').slice(0, 2).join('/'))));
+  for (const key of keys) pendingRecords.set(key, (pendingRecords.get(key) || 0) + 1);
+  return () => {
+    for (const key of keys) {
+      const count = (pendingRecords.get(key) || 1) - 1;
+      if (count) pendingRecords.set(key, count); else pendingRecords.delete(key);
+    }
+    snapshotPublishers.forEach((publish) => publish());
+  };
+}
+
 /**
- * Subscribe to one collection. The callback receives the parsed array plus the raw
- * value (so callers can detect legacy layouts). Returns an unsubscribe function.
+ * Subscribe to one collection. Unacknowledged local writes are excluded from the
+ * published snapshot so React/cache/business rules never treat them as confirmed.
  */
 export function subscribeToCollection<T>(
   name: CollectionName,
@@ -109,18 +127,36 @@ export function subscribeToCollection<T>(
     if (!isCloudDisabled()) console.warn(`Realtime Database not initialized; ${name} stays in local mode.`);
     return () => {};
   }
+  let latest: Record<string, unknown> | null = null;
+  let published: Record<string, unknown> | null = null;
+  let received = false;
+  const publish = () => {
+    if (!received) return;
+    const next = { ...latest };
+    for (const key of Array.from(pendingRecords.keys())) {
+      const [collection, id] = key.split('/');
+      if (collection !== name) continue;
+      if (published && id in published) next[id] = published[id]; else delete next[id];
+    }
+    published = Object.keys(next).length ? next : null;
+    onUpdate(snapshotToArray<T>(published), published, published !== null);
+  };
+  snapshotPublishers.add(publish);
   try {
-    return onValue(
+    const unsubscribe = onValue(
       collectionRef(name),
       (snapshot) => {
-        const raw = snapshot.exists() ? snapshot.val() : null;
-        onUpdate(snapshotToArray<T>(raw), raw, snapshot.exists());
+        latest = snapshot.exists() ? snapshot.val() : null;
+        received = true;
+        publish();
       },
       (error) => {
         console.warn(`Realtime Database listener error on ${name}:`, error.message);
       }
     );
+    return () => { snapshotPublishers.delete(publish); unsubscribe(); };
   } catch (e) {
+    snapshotPublishers.delete(publish);
     console.warn(`Error subscribing to ${name}:`, e);
     return () => {};
   }
@@ -147,9 +183,19 @@ export async function persistChanges(changes: Record<string, unknown>): Promise<
   if (isCloudDisabled()) return; // explicit offline test mode only
   if (!rtdb) throw new Error("ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาลองใหม่");
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const release = holdRecords(changes);
+  let write: Promise<void>;
+  try {
+    write = update(ref(rtdb, RTDB_ROOT), stripUndefined(changes));
+  } catch (error) {
+    release();
+    throw error;
+  }
+  // Do not release on UI timeout: Firebase may still commit or roll back later.
+  const settled = write.then(() => { release(); }, (error) => { release(); throw error; });
   try {
     await Promise.race([
-      update(ref(rtdb, RTDB_ROOT), stripUndefined(changes)),
+      settled,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(Object.assign(new Error("ยังไม่ได้รับการยืนยันจากฐานข้อมูล กรุณาตรวจสอบการเชื่อมต่อและลองใหม่"), { code: "WRITE_UNCONFIRMED" })), 15000);
       }),

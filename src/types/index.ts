@@ -114,6 +114,7 @@ export interface QEBooking {
   timeSlot: string; // e.g. "09:00 - 10:30"
   room: string; // e.g. "CE Lab 4731"
   status: BookingStatus;
+  resultId?: string; // Stable result pointer, validated atomically with the decision.
   examinerIds: [string, string, string]; // Exactly 3 examiners
   examinerNames: [string, string, string];
   prerequisitePassed: boolean;

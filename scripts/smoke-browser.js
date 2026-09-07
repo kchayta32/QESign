@@ -3,7 +3,8 @@
 // validation is covered separately). Creates/removes only DUO-BROWSER-* cloud fixtures.
 // Usage: node -r ./scripts/register-ts.js scripts/smoke-browser.js https://qe-sign.vercel.app --confirm-live
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -13,6 +14,12 @@ const { dbStore } = require('../src/lib/firebase/db.ts');
 const { persistChanges, RTDB_ROOT } = require('../src/lib/firebase/rtdb.ts');
 if (!process.argv.includes('--confirm-live')) throw new Error('Requires --confirm-live');
 const target = process.argv[2];
+const artifactDir = process.argv.find((arg) => arg.startsWith('--artifacts='))?.slice('--artifacts='.length);
+const evidence = { target, deploymentId: process.argv.find((arg) => arg.startsWith('--deployment='))?.slice('--deployment='.length),
+  sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), startedAt: new Date().toISOString(),
+  checks: [], screenshots: [], assets: [], cleanupVerified: false, passed: false };
+const log = console.log;
+console.log = (...args) => { evidence.checks.push(args.join(' ')); log(...args); };
 const chrome = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'qe-browser-'));
 const prefix = `DUO-BROWSER-${Date.now()}`;
@@ -23,6 +30,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let browser, socket, send;
 (async () => {
   try {
+    if (artifactDir) {
+      assert.ok(evidence.deploymentId, '--deployment is required with --artifacts');
+      fs.mkdirSync(artifactDir, { recursive: true });
+      const response = await fetch(target);
+      assert.equal(response.status, 200);
+      evidence.vercelRequestId = response.headers.get('x-vercel-id');
+      const html = await response.text();
+      for (const source of new Set([...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((match) => match[1]))) {
+        const url = new URL(source, target).href;
+        const asset = await fetch(url);
+        assert.equal(asset.status, 200);
+        evidence.assets.push({ url, sha256: createHash('sha256').update(Buffer.from(await asset.arrayBuffer())).digest('hex') });
+      }
+    }
     browser = spawn(chrome, ['--headless=new', '--no-first-run', '--disable-background-networking',
       '--remote-debugging-port=9333', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
     let page;
@@ -51,6 +72,13 @@ let browser, socket, send;
     };
     await send('Runtime.enable');
     await send('Page.enable');
+    const capture = async (name) => {
+      if (!artifactDir) return;
+      const screenshot = await send('Page.captureScreenshot', { format: 'png' });
+      const bytes = Buffer.from(screenshot.data, 'base64');
+      fs.writeFileSync(path.join(artifactDir, `${name}.png`), bytes);
+      evidence.screenshots.push({ file: `${name}.png`, sha256: createHash('sha256').update(bytes).digest('hex') });
+    };
     const evaluate = async (expression) => {
       const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
@@ -103,7 +131,7 @@ let browser, socket, send;
     await until("document.body.innerText.includes('เอกสารโครงงาน: Proposal')");
     await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'ส่งเอกสาร (.pdf)').click(); true");
     await until(`!!document.querySelector('input[type=file][accept=".pdf,application/pdf"]')`);
-    const pdfText = '%PDF-1.4\\n1 0 obj\\n<< /Type /Catalog >>\\nendobj\\n%%EOF';
+    const pdfText = require('./pdf-fixture')();
     await evaluate(`(() => {
       const transfer = new DataTransfer();
       transfer.items.add(new File([${JSON.stringify(pdfText)}], 'browser-proposal.pdf', { type: 'application/pdf' }));
@@ -119,6 +147,7 @@ let browser, socket, send;
     cleanup[`projectDocuments/${doc.id}`] = null;
     cleanup[`documentFiles/${doc.id}`] = null;
     assert.equal(doc.status, 'submitted');
+    await capture('production-pdf-submitted');
     assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/documentFiles/${doc.id}`))).val(), `data:application/pdf;base64,${Buffer.from(pdfText).toString('base64')}`);
     await evaluate('location.reload(); true');
     await until(`!!document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]')`);
@@ -131,6 +160,7 @@ let browser, socket, send;
     console.log('[PASS] production browser PDF selection, atomic upload, reload persistence and atomic withdrawal');
     assert.deepEqual(exceptions, [], 'uncaught browser exceptions');
     console.log('[PASS] no uncaught browser runtime exceptions');
+    evidence.passed = true;
   } finally {
     if (send) { try { await send('Browser.close'); } catch {} }
     socket?.close(); browser?.kill();
@@ -143,6 +173,11 @@ let browser, socket, send;
     await update(ref(rtdb, RTDB_ROOT), cleanup);
     for (const p of Object.keys(cleanup)) assert.equal((await get(ref(rtdb, `${RTDB_ROOT}/${p}`))).exists(), false);
     console.log(`[PASS] browser fixtures removed and read-back verified (${prefix})`);
+    evidence.cleanupVerified = true;
+    evidence.fixturePrefix = prefix;
+    evidence.cleanupPaths = Object.keys(cleanup);
+    evidence.finishedAt = new Date().toISOString();
+    if (artifactDir) fs.writeFileSync(path.join(artifactDir, 'browser-evidence.json'), JSON.stringify(evidence, null, 2) + '\n');
     await sleep(500);
     fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }

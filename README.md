@@ -51,6 +51,8 @@
 ### 1. เกณฑ์คุณสมบัติก่อนจองสอบ (Prerequisite Check)
 - นักศึกษาต้องมีสถานะ `active` และ **สอบ 3 บทผ่านแล้วเท่านั้น** (อาจารย์ที่ปรึกษาบันทึกผล "ผ่าน" ให้เอกสารสอบ 3 บท) จึงจะสามารถจองรอบสอบ QE ได้ — หน้าจองสอบจะแสดงสาเหตุและปุ่มไปยังเมนูเอกสารโครงงานเมื่อยังไม่ผ่าน
 - นักศึกษาที่ผ่าน QE แล้ว หรือมีคำร้องที่ยังไม่ได้ประเมินผล จะไม่สามารถจองซ้ำได้
+- การจองใหม่เขียน `qeBookings` พร้อม `qeBookingSlots/<studentId>` ในครั้งเดียว โดย rules ยอมให้เปลี่ยน slot เมื่อคำร้องเดิมประเมิน/ยกเลิกแล้วเท่านั้น จึงป้องกันสอง client จองพร้อมกันได้ ผลสอบใหม่ใช้รหัส `RES-QE-<bookingId>` และ `resultId` ที่เปลี่ยนไม่ได้เพื่อให้การ retry/ประเมินพร้อมกันไม่สร้างผลซ้ำ
+- Realtime listeners ซ่อน snapshot ชั่วคราวของรายการที่ยังไม่ได้รับ write acknowledgement (รวมกรณี timeout แล้วได้คำยืนยันภายหลัง) จึงไม่ปลดล็อกสิทธิ์หรือแสดงผลผ่านจาก optimistic update
 
 ### 2. เกณฑ์การตัดสินผลสอบ QE ด้วยคณะกรรมการ 3 ท่าน (2/3 Committee Rule)
 - จัดคณะกรรมการสอบประจำห้องจำนวน **3 ท่าน**
@@ -149,7 +151,9 @@ npm run reset:demo -- --all-transactions   # ล้างการจอง/ผ�
 - Realtime Database validation/index rules อยู่ใน `database.rules.json` และ `firebase.json`; ฐานข้อมูล CE ROOM ใช้ร่วมกับแอปอื่น **อย่า deploy ไฟล์นี้ทับ rules ทั้งฐานโดยตรง** ใช้ `node scripts/deploy-database-rules.js` เพื่อตรวจ dry run แล้ว `node scripts/deploy-database-rules.js --confirm-live` เพื่อแทนที่เฉพาะ `/ssru_ce` โดยสำรอง rules เก่าและอ่านกลับยืนยันว่า rules ส่วนอื่นไม่เปลี่ยน
 - Deploy frontend รุ่น atomic-write ก่อน rules แล้วให้ผู้ใช้ reload; client เก่าที่ส่ง PDF กับ metadata แยกกันจะถูก validation ปฏิเสธ
 - **ข้อจำกัดด้านความปลอดภัยเดิม:** Firebase Auth ยังไม่ได้ใช้บังคับสิทธิ์ และ live database มี root read/write แบบเปิดอยู่ สคริปต์ข้างต้นรักษาสิทธิ์เดิมโดยไม่เพิ่มสิทธิ์ Rules ใหม่นี้ตรวจความสอดคล้องของข้อมูลเท่านั้น ไม่ใช่ authorization: client ยังแก้สถานะนักศึกษาได้ ต้องทำ Firebase Auth + role/ownership rules ทั้งฐานร่วมกับเจ้าของแอปอื่นก่อนถือว่าปลอดภัยสำหรับข้อมูลส่วนบุคคล
-- Regression tests ไม่เขียนข้อมูลจริง; live Firebase/browser smoke ใช้ fixture เฉพาะกิจและลบพร้อมอ่านกลับยืนยันทุก path โดย browser smoke ตรวจ upload/reload/withdraw PDF เพิ่มจาก first-profile ทั้งสองบทบาท
+- Regression tests ไม่เขียนข้อมูลจริง; `test-realtime.js` ทดสอบ optimistic callbacks, rollback, timeout/late acknowledgement และ concurrent calls ด้วย store จริง ส่วน live smoke ใช้สอง REST clients ทดสอบ slot race และ result idempotency กับ rules จริง
+- Live Firebase/browser smoke ใช้ fixture เฉพาะกิจและลบพร้อมอ่านกลับยืนยันทุก path โดย browser smoke ตรวจ upload/reload/withdraw PDF เพิ่มจาก first-profile ทั้งสองบทบาท เพิ่ม `--artifacts=verification/production --deployment=<deployment-id>` เพื่อบันทึก screenshot และ JSON ที่ระบุ source commit, hash ของ production JS assets, ผลตรวจ และ cleanup paths สำหรับตรวจรับอิสระ
+- ก่อนเปิดใช้ slot rules กับฐานที่มีคำร้องค้าง ต้อง backfill slot จากคำร้องที่ยังไม่ประเมินและตรวจรายการซ้ำก่อน (production ที่ตรวจในการอัปเกรดนี้มี 0 bookings / 0 results จึงไม่ต้อง migrate)
 
 ---
 
