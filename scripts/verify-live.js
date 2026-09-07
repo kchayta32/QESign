@@ -18,10 +18,16 @@ function getPage(target) {
 }
 
 getPage(url)
-  .then(({ status, headers, body }) => {
+  .then(async ({ status, headers, body }) => {
+    const sources = [...new Set([...body.matchAll(/<script[^>]+src="([^"]+)"/g)].map((match) => match[1]))];
+    const assets = await Promise.all(sources.map((source) => getPage(new URL(source, url))));
+    const javascript = assets.map((asset) => asset.body).join("\n");
     console.log(`GET ${url} -> ${status}, ${body.length} bytes, x-vercel-id=${headers["x-vercel-id"]}`);
     const checks = [
       ["HTTP 200", status === 200],
+      ["all referenced JavaScript assets load", assets.length > 0 && assets.every((asset) => asset.status === 200)],
+      ["new document workflow shipped", javascript.includes("pdf://") && javascript.includes("chapter5")],
+      ["demo-free cache revision shipped", javascript.includes("SSRU_CE_DATA_STORE_V5")],
       ["new faculty name present", /คณะวิศวกรรมศาสตร์และเทคโนโลยีอุตสาหกรรม/.test(body)],
       ["old faculty name absent", !/คณะเทคโนโลยีอุตสาหกรรม/.test(body)],
       ["self-registration absent", !/ลงทะเบียน(สมาชิก|นักศึกษา)ใหม่/.test(body)],
