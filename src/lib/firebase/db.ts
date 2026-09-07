@@ -22,6 +22,7 @@ import type {
   AccountSecurity,
   ExamRound,
   ExamSlot,
+  BookedStudentInfo,
   QEBooking,
   QEResult,
   AdvisorMeetingLog,
@@ -95,6 +96,27 @@ export function mergeRegistry<T extends Identified>(seed: T[], overlay: T[]): T[
     if (!seedIds.has(item.id)) merged.push(item);
   }
   return merged;
+}
+
+/**
+ * Normalise student booking list for an exam slot, handling both multi-seat
+ * array `bookedStudents` and legacy single-seat fields.
+ */
+export function getSlotBookedStudents(slot: ExamSlot): BookedStudentInfo[] {
+  if (Array.isArray(slot.bookedStudents) && slot.bookedStudents.length > 0) {
+    return slot.bookedStudents;
+  }
+  if (slot.bookedStudentId && slot.bookedStudentCode && slot.bookedStudentName) {
+    return [{
+      studentId: slot.bookedStudentId,
+      studentCode: slot.bookedStudentCode,
+      studentName: slot.bookedStudentName,
+      bookingId: slot.bookingId,
+      bookedAt: slot.createdAt || new Date().toISOString(),
+      notes: slot.notes,
+    }];
+  }
+  return [];
 }
 
 /**
@@ -907,11 +929,13 @@ class AppDataStore {
     if (!data.timeSlot) throw new Error("กรุณาระบุช่วงเวลาสอบ");
     if (!data.location?.trim()) throw new Error("กรุณากรอกสถานที่สอบ");
 
+    const capacity = Math.max(1, Number(data.capacity) || 1);
     const newSlot: ExamSlot = {
       ...data,
       id: `SLOT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
       status: "open",
-      capacity: data.capacity || 1,
+      capacity,
+      bookedStudents: [],
       createdAt: new Date().toISOString(),
     };
 
@@ -931,7 +955,18 @@ class AppDataStore {
   ): Promise<{ slot: ExamSlot; booking?: QEBooking }> {
     const slot = this.examSlots.find((s) => s.id === slotId);
     if (!slot) throw new Error("ไม่พบรอบสอบที่ระบุ");
-    if (slot.status !== "open") throw new Error("รอบสอบนี้ถูกจองแล้วหรือปิดรับจองแล้ว");
+    if (slot.status === "cancelled") throw new Error("รอบสอบนี้ถูกยกเลิกแล้ว");
+
+    const currentBooked = getSlotBookedStudents(slot);
+    const capacity = Math.max(1, slot.capacity || 1);
+
+    if (currentBooked.some((s) => s.studentId === student.id || s.studentCode === student.studentCode)) {
+      throw new Error("คุณได้ทำการลงทะเบียนจองรอบสอบนี้ไปแล้ว");
+    }
+
+    if (currentBooked.length >= capacity) {
+      throw new Error(`รอบสอบนี้ที่นั่งเต็มแล้ว (${currentBooked.length}/${capacity} ที่นั่ง)`);
+    }
 
     const studentName = `${student.prefixTh} ${student.firstNameTh} ${student.lastNameTh}`.trim();
 
@@ -979,13 +1014,27 @@ class AppDataStore {
         notes: notes || slot.notes,
       });
 
+      const newStudentInfo: BookedStudentInfo = {
+        studentId: student.id,
+        studentCode: student.studentCode,
+        studentName: studentName,
+        bookingId: newBooking.id,
+        bookedAt: new Date().toISOString(),
+        notes: notes || slot.notes,
+      };
+
+      const updatedBookedStudents = [...currentBooked, newStudentInfo];
+      const isFull = updatedBookedStudents.length >= capacity;
+
       const updatedSlot: ExamSlot = {
         ...slot,
-        status: "booked",
-        bookedStudentId: student.id,
-        bookedStudentCode: student.studentCode,
-        bookedStudentName: studentName,
-        bookingId: newBooking.id,
+        capacity,
+        status: isFull ? "booked" : "open",
+        bookedStudents: updatedBookedStudents,
+        bookedStudentId: updatedBookedStudents[0].studentId,
+        bookedStudentCode: updatedBookedStudents[0].studentCode,
+        bookedStudentName: updatedBookedStudents[0].studentName,
+        bookingId: updatedBookedStudents[0].bookingId,
         notes: notes || slot.notes,
       };
 
@@ -1000,12 +1049,25 @@ class AppDataStore {
       // PROJECT exam slot
       if (student.status !== "active") throw new Error("นักศึกษาไม่อยู่ในสถานะที่สามารถจองสอบได้");
 
+      const newStudentInfo: BookedStudentInfo = {
+        studentId: student.id,
+        studentCode: student.studentCode,
+        studentName: studentName,
+        bookedAt: new Date().toISOString(),
+        notes: notes || slot.notes,
+      };
+
+      const updatedBookedStudents = [...currentBooked, newStudentInfo];
+      const isFull = updatedBookedStudents.length >= capacity;
+
       const updatedSlot: ExamSlot = {
         ...slot,
-        status: "booked",
-        bookedStudentId: student.id,
-        bookedStudentCode: student.studentCode,
-        bookedStudentName: studentName,
+        capacity,
+        status: isFull ? "booked" : "open",
+        bookedStudents: updatedBookedStudents,
+        bookedStudentId: updatedBookedStudents[0].studentId,
+        bookedStudentCode: updatedBookedStudents[0].studentCode,
+        bookedStudentName: updatedBookedStudents[0].studentName,
         notes: notes || slot.notes,
       };
 
@@ -1024,6 +1086,12 @@ class AppDataStore {
     if (!slot) throw new Error("ไม่พบรอบสอบที่ต้องการยกเลิก");
     if (teacherId && slot.teacherId !== teacherId) throw new Error("ไม่มีสิทธิ์ยกเลิกรอบสอบนี้");
 
+    const booked = getSlotBookedStudents(slot);
+    for (const b of booked) {
+      if (b.bookingId) {
+        this.cancelQEBooking(b.bookingId);
+      }
+    }
     if (slot.bookingId) {
       this.cancelQEBooking(slot.bookingId);
     }

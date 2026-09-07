@@ -176,6 +176,77 @@ const check = (name, ok, extra = "") => {
   const openAfterCancel = dbStore.getOpenExamSlots();
   check("Cancelled slot not in open list", !openAfterCancel.some((s) => s.id === qeSlotDB.id));
 
+  // 6. Multi-Seat Capacity & Multiple Students Booking
+  console.log("\n--- Test 6: Multi-Seat Capacity (Multiple Students Booking) ---");
+  const multiSeatSlot = await dbStore.createExamSlot({
+    teacherId: teacherA.id,
+    teacherName: `${teacherA.prefixTh}${teacherA.firstNameTh} ${teacherA.lastNameTh}`,
+    category: "PROJECT",
+    projectStage: "proposal",
+    examDate: "2026-10-25",
+    timeSlot: "10:45 - 12:15",
+    location: "ห้อง 4735 อาคาร 47",
+    capacity: 2, // 2 seats
+    notes: "รอบสอบหัวข้อโครงงาน เปิดรับ 2 ทีม",
+  });
+  check("Multi-seat slot created with capacity=2", multiSeatSlot.capacity === 2 && multiSeatSlot.status === "open");
+
+  // Setup Student 2 & Student 3 for multi-seat booking
+  const studentM1 = dbStore.updateStudentProfile("STD-66122519021", {
+    prefixTh: "นาย",
+    firstNameTh: "คนที่หนึ่ง",
+    lastNameTh: "จองสำเร็จ",
+    advisorId: teacherA.id,
+    profileCompleted: true,
+    status: "active",
+  });
+  const studentM2 = dbStore.updateStudentProfile("STD-66122519022", {
+    prefixTh: "นางสาว",
+    firstNameTh: "คนที่สอง",
+    lastNameTh: "จองสำเร็จ",
+    advisorId: teacherA.id,
+    profileCompleted: true,
+    status: "active",
+  });
+  const studentM3 = dbStore.updateStudentProfile("STD-66122519023", {
+    prefixTh: "นาย",
+    firstNameTh: "คนที่สาม",
+    lastNameTh: "จองเกินความจุ",
+    advisorId: teacherA.id,
+    profileCompleted: true,
+    status: "active",
+  });
+
+  // Booking 1: Student M1 books -> 1 of 2 seats filled, slot remains open
+  const res1 = await dbStore.bookExamSlot(multiSeatSlot.id, studentM1, "หัวข้อโครงงาน A");
+  check("First student books successfully", res1.slot.bookedStudents?.length === 1);
+  check("Slot remains open after first booking", res1.slot.status === "open");
+
+  // Duplicate booking by same student M1 must be rejected
+  let duplicateBookingRejected = false;
+  try {
+    await dbStore.bookExamSlot(multiSeatSlot.id, studentM1);
+  } catch (err) {
+    duplicateBookingRejected = true;
+  }
+  check("Duplicate booking by same student rejected", duplicateBookingRejected);
+
+  // Booking 2: Student M2 books -> 2 of 2 seats filled, slot becomes full/booked
+  const res2 = await dbStore.bookExamSlot(multiSeatSlot.id, studentM2, "หัวข้อโครงงาน B");
+  check("Second student books successfully", res2.slot.bookedStudents?.length === 2);
+  check("Slot status becomes booked when capacity is reached", res2.slot.status === "booked");
+
+  // Booking 3: Student M3 attempts to book full slot -> MUST BE REJECTED
+  let fullSlotRejected = false;
+  let fullErrorMsg = "";
+  try {
+    await dbStore.bookExamSlot(multiSeatSlot.id, studentM3);
+  } catch (err) {
+    fullSlotRejected = true;
+    fullErrorMsg = err.message;
+  }
+  check("Third student booking rejected because slot is full", fullSlotRejected, fullErrorMsg);
+
   console.log(`\n=== Verification Complete: ${failures} failure(s) ===\n`);
   process.exit(failures > 0 ? 1 : 0);
 })();

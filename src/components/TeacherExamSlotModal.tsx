@@ -15,7 +15,8 @@ import {
   Database,
   FileCheck,
   AlertCircle,
-  Plus
+  Plus,
+  Users
 } from "lucide-react";
 
 interface TeacherExamSlotModalProps {
@@ -48,6 +49,7 @@ export default function TeacherExamSlotModal({
   const [isCustomTime, setIsCustomTime] = useState<boolean>(false);
   const [customTimeSlot, setCustomTimeSlot] = useState<string>("");
   const [location, setLocation] = useState<string>("ห้องปฏิบัติการ 4731 (CE LAB)");
+  const [capacity, setCapacity] = useState<number>(5);
   const [notes, setNotes] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -70,6 +72,10 @@ export default function TeacherExamSlotModal({
     }
     if (!location.trim()) {
       setErrorMsg("กรุณาระบุสถานที่สอบในช่อง Textbox");
+      return;
+    }
+    if (!capacity || capacity < 1) {
+      setErrorMsg("กรุณาระบุจำนวนที่นั่งที่เปิดรับอย่างน้อย 1 ที่นั่ง");
       return;
     }
 
@@ -102,7 +108,7 @@ export default function TeacherExamSlotModal({
         location: location.trim(),
         teacherId: teacher.id,
         teacherName: `${teacher.prefixTh}${teacher.firstNameTh} ${teacher.lastNameTh}`,
-        capacity: 1,
+        capacity: Math.max(1, capacity || 1),
         notes: notes.trim() || undefined,
       });
 
@@ -413,6 +419,48 @@ export default function TeacherExamSlotModal({
             />
             <p className="text-[10px] text-neutral-400 mt-1">
               อาจารย์สามารถพิมพ์ระบุสถานที่ ห้องปฏิบัติการ หรือช่องทางการสอบแบบออนไลน์ได้อิสระ
+            </p>
+          </div>
+
+          {/* Capacity (Number of Seats) */}
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-ssru-crimson" />
+                <span>จำนวนที่นั่งที่เปิดรับ (ที่นั่ง)</span>
+              </span>
+              <span className="text-[11px] font-normal text-neutral-500">
+                รองรับการจองได้หลายคน
+              </span>
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={capacity}
+                onChange={(e) => setCapacity(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-28 text-xs font-bold text-center bg-white border border-neutral-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-ssru-crimson/20 focus:border-ssru-crimson"
+              />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {[1, 3, 5, 10, 15, 20].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setCapacity(preset)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      capacity === preset
+                        ? "bg-ssru-crimson text-white shadow-sm"
+                        : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+                    }`}
+                  >
+                    {preset} ที่นั่ง
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[10px] text-neutral-400 mt-1">
+              กำหนดจำนวนที่นั่งสอบที่รองรับในรอบนี้ เพื่อให้นักศึกษาสามารถลงทะเบียนจองได้หลายคนพร้อมกัน
             </p>
           </div>
 

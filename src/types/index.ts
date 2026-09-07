@@ -290,6 +290,15 @@ export type QEExamType = 'HW' | 'SW' | 'DB'; // ฮาร์ตแวร์, ซ
 export type ProjectExamStage = 'proposal' | 'chapter3' | 'chapter5'; // สอบหัวข้อโครงงาน, สอบก้าวหน้า 3 บท, สอบป้องกัน 5 บท
 export type ExamSlotStatus = 'open' | 'booked' | 'cancelled';
 
+export interface BookedStudentInfo {
+  studentId: string;
+  studentCode: string;
+  studentName: string;
+  bookingId?: string;
+  bookedAt: string;
+  notes?: string;
+}
+
 export interface ExamSlot {
   id: string;
   category: ExamCategory;
@@ -303,6 +312,7 @@ export interface ExamSlot {
   teacherName: string;
   status: ExamSlotStatus;
   capacity: number;
+  bookedStudents?: BookedStudentInfo[];
   bookedStudentId?: string;
   bookedStudentCode?: string;
   bookedStudentName?: string;

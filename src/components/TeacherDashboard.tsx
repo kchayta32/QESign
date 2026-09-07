@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { dbStore } from "@/lib/firebase/db";
+import { dbStore, getSlotBookedStudents } from "@/lib/firebase/db";
 import { formatThaiDate } from "@/lib/utils";
 import TeacherEvaluationSheet from "./TeacherEvaluationSheet";
 import AdvisorLogsManager from "./AdvisorLogsManager";
@@ -261,18 +261,24 @@ export default function TeacherDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {visibleExamSlots.map((slot) => {
               const isMine = slot.teacherId === currentTeacher.id;
-              const isBooked = slot.status === "booked";
+              const bookedStudents = getSlotBookedStudents(slot);
+              const capacity = Math.max(1, slot.capacity || 1);
+              const bookedCount = bookedStudents.length;
+              const isFull = bookedCount >= capacity;
+              const hasBookings = bookedCount > 0;
 
               return (
                 <div
                   key={slot.id}
                   className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
-                    isBooked
-                      ? "bg-blue-50/50 border-blue-200"
+                    isFull
+                      ? "bg-neutral-50/80 border-neutral-300"
+                      : hasBookings
+                      ? "bg-blue-50/40 border-blue-200"
                       : "bg-white border-neutral-200 hover:border-neutral-300 shadow-sm"
                   }`}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {slot.category === "QE" ? (
@@ -293,12 +299,18 @@ export default function TeacherDashboard() {
 
                       <span
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          isBooked
+                          isFull
+                            ? "bg-neutral-200 text-neutral-700"
+                            : hasBookings
                             ? "bg-blue-100 text-blue-800"
                             : "bg-emerald-100 text-emerald-800"
                         }`}
                       >
-                        {isBooked ? "มีผู้จองแล้ว" : "เปิดรับจอง"}
+                        {isFull
+                          ? `ที่นั่งเต็ม (${bookedCount}/${capacity})`
+                          : hasBookings
+                          ? `จองแล้ว ${bookedCount}/${capacity} ที่`
+                          : `เปิดรับจอง (${capacity} ที่นั่ง)`}
                       </span>
                     </div>
 
@@ -319,13 +331,47 @@ export default function TeacherDashboard() {
                         <MapPin className="w-3 h-3 text-ssru-crimson flex-shrink-0 mt-0.5" />
                         <span className="font-medium break-words">{slot.location}</span>
                       </div>
+                      <div className="flex items-center justify-between text-neutral-600 pt-1 border-t border-neutral-200/60">
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-neutral-500">
+                          <Users className="w-3 h-3 text-neutral-400" />
+                          <span>ความจุที่นั่งสอบ:</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-neutral-700">
+                          {bookedCount} / {capacity} ที่นั่ง
+                          {capacity - bookedCount > 0 ? (
+                            <span className="text-emerald-600 font-normal ml-1">
+                              (ว่าง {capacity - bookedCount})
+                            </span>
+                          ) : (
+                            <span className="text-red-500 font-normal ml-1">(เต็ม)</span>
+                          )}
+                        </span>
+                      </div>
                     </div>
 
-                    {isBooked && (
-                      <div className="p-2 rounded-xl bg-blue-100/70 text-blue-950 text-[11px] space-y-0.5">
-                        <span className="font-bold block">ผู้จองสอบ:</span>
-                        <p>{slot.bookedStudentName}</p>
-                        <p className="font-mono text-[10px] opacity-80">{slot.bookedStudentCode}</p>
+                    {hasBookings && (
+                      <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-100 text-blue-950 text-[11px] space-y-1.5">
+                        <div className="flex items-center justify-between font-bold text-[11px]">
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3.5 h-3.5 text-blue-700" />
+                            <span>รายชื่อผู้จองสอบ ({bookedCount} คน):</span>
+                          </span>
+                        </div>
+                        <div className="divide-y divide-blue-200/50 max-h-32 overflow-y-auto space-y-1">
+                          {bookedStudents.map((st, i) => (
+                            <div key={st.studentId || i} className="pt-1 first:pt-0 flex items-center justify-between text-[10.5px]">
+                              <div>
+                                <span className="font-semibold block text-neutral-800">{st.studentName}</span>
+                                <span className="font-mono text-[10px] text-neutral-500">{st.studentCode}</span>
+                              </div>
+                              {st.notes && (
+                                <span className="text-[10px] text-neutral-500 italic max-w-[120px] truncate" title={st.notes}>
+                                  {st.notes}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -335,7 +381,7 @@ export default function TeacherDashboard() {
                       โดย {slot.teacherName}
                     </span>
 
-                    {isMine && !isBooked && (
+                    {isMine && (
                       <button
                         type="button"
                         onClick={() => handleCancelSlot(slot.id)}

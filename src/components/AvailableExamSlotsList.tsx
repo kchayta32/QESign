@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Student, ExamSlot, ExamCategory, TrackType } from "@/types";
-import { dbStore } from "@/lib/firebase/db";
+import { dbStore, getSlotBookedStudents } from "@/lib/firebase/db";
 import { formatThaiDate } from "@/lib/utils";
 import { checkQEBookingPrerequisite } from "@/lib/rules/engine";
 import {
@@ -10,6 +10,7 @@ import {
   Clock,
   MapPin,
   User,
+  Users,
   Sparkles,
   BookOpen,
   CheckCircle2,
@@ -77,19 +78,32 @@ export default function AvailableExamSlotsList({
   let qePrerequisite = { canBook: true, reasonTh: "" };
   let isAlreadyPassedQE = false;
   let hasOpenQEBooking = false;
+  let isSlotFull = false;
+  let isAlreadyBookedByMe = false;
 
-  if (confirmingSlot && confirmingSlot.category === "QE") {
-    const trackId = (confirmingSlot.qeType as TrackType) || student.trackId || "SW";
-    qePrerequisite = checkQEBookingPrerequisite(student, trackId, documents);
-    isAlreadyPassedQE = student.passedQE || dbStore.getQEResultByStudent(student.id)?.finalResult === "passed";
-    hasOpenQEBooking = !!dbStore.getOpenQEBookingByStudent(student.id);
+  if (confirmingSlot) {
+    const booked = getSlotBookedStudents(confirmingSlot);
+    const cap = Math.max(1, confirmingSlot.capacity || 1);
+    isSlotFull = booked.length >= cap;
+    isAlreadyBookedByMe = booked.some(
+      (s) => s.studentId === student.id || s.studentCode === student.studentCode
+    );
+
+    if (confirmingSlot.category === "QE") {
+      const trackId = (confirmingSlot.qeType as TrackType) || student.trackId || "SW";
+      qePrerequisite = checkQEBookingPrerequisite(student, trackId, documents);
+      isAlreadyPassedQE = student.passedQE || dbStore.getQEResultByStudent(student.id)?.finalResult === "passed";
+      hasOpenQEBooking = !!dbStore.getOpenQEBookingByStudent(student.id);
+    }
   }
 
   const canConfirm =
     !confirmingSlot ||
-    (confirmingSlot.category === "QE"
-      ? qePrerequisite.canBook && !isAlreadyPassedQE && !hasOpenQEBooking
-      : student.status === "active");
+    (!isSlotFull &&
+      !isAlreadyBookedByMe &&
+      (confirmingSlot.category === "QE"
+        ? qePrerequisite.canBook && !isAlreadyPassedQE && !hasOpenQEBooking
+        : student.status === "active"));
 
   return (
     <div className="bg-white rounded-3xl p-6 shadow-soft border border-neutral-200 space-y-5">
@@ -167,9 +181,15 @@ export default function AvailableExamSlotsList({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredSlots.map((slot) => {
-            const isBookedByMe = slot.bookedStudentId === student.id || slot.bookedStudentCode === student.studentCode;
-            const isBooked = slot.status === "booked";
-            const isAvailable = slot.status === "open";
+            const bookedStudents = getSlotBookedStudents(slot);
+            const capacity = Math.max(1, slot.capacity || 1);
+            const bookedCount = bookedStudents.length;
+            const isBookedByMe = bookedStudents.some(
+              (s) => s.studentId === student.id || s.studentCode === student.studentCode
+            );
+            const isFull = bookedCount >= capacity;
+            const remainingSeats = Math.max(0, capacity - bookedCount);
+            const isAvailable = !isFull && !isBookedByMe;
 
             return (
               <div
@@ -179,7 +199,7 @@ export default function AvailableExamSlotsList({
                     ? "bg-blue-50/60 border-blue-300 shadow-sm"
                     : isAvailable
                     ? "bg-white border-neutral-200 hover:border-neutral-300 hover:shadow-md"
-                    : "bg-neutral-50/80 border-neutral-200 opacity-75"
+                    : "bg-neutral-50/80 border-neutral-200 opacity-80"
                 }`}
               >
                 <div>
@@ -228,11 +248,11 @@ export default function AvailableExamSlotsList({
                       </span>
                     ) : isAvailable ? (
                       <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        เปิดรับจอง
+                        เปิดรับจอง (ว่าง {remainingSeats}/{capacity})
                       </span>
                     ) : (
-                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-neutral-200 text-neutral-600">
-                        มีผู้จองแล้ว
+                      <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-200 text-neutral-600">
+                        ที่นั่งเต็มแล้ว ({capacity}/{capacity})
                       </span>
                     )}
                   </div>
@@ -267,6 +287,30 @@ export default function AvailableExamSlotsList({
                       <span className="font-semibold text-neutral-700">อาจารย์ผู้เปิดรอบ:</span>
                       <span>{slot.teacherName}</span>
                     </div>
+
+                    <div className="pt-1.5 border-t border-neutral-200/60 space-y-1">
+                      <div className="flex items-center justify-between text-neutral-600">
+                        <span className="flex items-center gap-1.5 font-semibold text-neutral-700">
+                          <Users className="w-3.5 h-3.5 text-ssru-crimson flex-shrink-0" />
+                          <span>ที่นั่งสอบที่เปิดรับ:</span>
+                        </span>
+                        <span className="font-bold">
+                          {remainingSeats > 0 ? (
+                            <span className="text-emerald-700">ว่าง {remainingSeats} จาก {capacity} ที่นั่ง</span>
+                          ) : (
+                            <span className="text-neutral-500">เต็ม {capacity} ที่นั่ง</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="w-full bg-neutral-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-1.5 rounded-full transition-all ${
+                            isFull ? "bg-neutral-400" : "bg-emerald-500"
+                          }`}
+                          style={{ width: `${Math.min(100, Math.round((bookedCount / capacity) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   {slot.notes && (
@@ -279,7 +323,11 @@ export default function AvailableExamSlotsList({
                 {/* Booking Button */}
                 <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
                   <span className="text-[11px] text-neutral-400">
-                    {isBookedByMe ? "คำร้องได้รับการบันทึกแล้ว" : isAvailable ? "พร้อมให้จองทันที" : "ไม่สามารถจองซ้ำได้"}
+                    {isBookedByMe
+                      ? "คุณได้จองรอบสอบนี้แล้ว"
+                      : isAvailable
+                      ? `เหลือ ${remainingSeats} ที่นั่งสุดท้าย`
+                      : "รอบสอบนี้ที่นั่งเต็มแล้ว"}
                   </span>
 
                   {isBookedByMe ? (
@@ -402,9 +450,17 @@ export default function AvailableExamSlotsList({
                 <span className="font-bold text-neutral-charcoal">{confirmingSlot.location}</span>
               </div>
 
-              <div>
-                <span className="text-neutral-400 block">อาจารย์ผู้เปิดรอบ:</span>
-                <span className="font-bold text-neutral-charcoal">{confirmingSlot.teacherName}</span>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-neutral-400 block">อาจารย์ผู้เปิดรอบ:</span>
+                  <span className="font-bold text-neutral-charcoal">{confirmingSlot.teacherName}</span>
+                </div>
+                <div>
+                  <span className="text-neutral-400 block">ที่นั่งสอบ:</span>
+                  <span className="font-bold text-emerald-700">
+                    ว่าง {Math.max(0, (confirmingSlot.capacity || 1) - getSlotBookedStudents(confirmingSlot).length)} / {confirmingSlot.capacity || 1} ที่นั่ง
+                  </span>
+                </div>
               </div>
 
               <div>
