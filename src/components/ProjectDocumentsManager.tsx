@@ -63,7 +63,7 @@ export default function ProjectDocumentsManager({ student, currentTeacher, role,
 
   const passed3 = hasPassed3ChapterExam(liveStudent, documents);
   const pendingCount = documents.filter((d) => d.status === "submitted").length;
-  const isAdvisor = role === "teacher" && !!currentTeacher && (liveStudent.advisorId === currentTeacher.id || liveStudent.coAdvisorId === currentTeacher.id);
+  const isAdvisor = role === "teacher" && !!currentTeacher && (liveStudent.advisorId === currentTeacher.id || liveStudent.coAdvisorId === currentTeacher.id || liveStudent.coAdvisor2Id === currentTeacher.id);
   const canReview = role === "teacher" && !!currentTeacher;
 
   return (

@@ -56,7 +56,7 @@ export default function TeacherDashboard() {
   const awaitingCount = myBookings.filter((b) => b.status !== "evaluated").length;
 
   const advisees = allStudents.filter(
-    (s) => s.advisorId === currentTeacher.id || s.coAdvisorId === currentTeacher.id
+    (s) => s.advisorId === currentTeacher.id || s.coAdvisorId === currentTeacher.id || s.coAdvisor2Id === currentTeacher.id
   );
 
   const q = searchQuery.trim().toLowerCase();

@@ -67,6 +67,30 @@ global.FileReader = class {
     console.log(`[PASS] ${kind} profile reports success only after primary DB acknowledgement; rejection preserves state`);
     write = async () => { throw new Error('PERMISSION_DENIED'); };
   }
+  const profileId = 'STD-66122519020';
+  const originalAdvisor = dbStore.getStudentById(profileId).advisorId;
+  const coAdvisorUpdates = { coAdvisorId: 'T-101', coAdvisor2Id: 'CUSTOM-อ. ทดสอบ' };
+  await assert.rejects(dbStore.saveProfile('student', profileId, coAdvisorUpdates), /PERMISSION_DENIED/);
+  assert.equal(dbStore.getStudentById(profileId).coAdvisor2Id, undefined);
+  let acknowledgeCoAdvisors;
+  write = () => new Promise((resolve) => { acknowledgeCoAdvisors = resolve; });
+  const coAdvisorSave = dbStore.saveProfile('student', profileId, coAdvisorUpdates);
+  assert.equal(dbStore.getStudentById(profileId).coAdvisor2Id, undefined, 'co-advisors are not published optimistically');
+  assert.deepEqual(lastChanges, {
+    [`students/${profileId}/coAdvisorId`]: 'T-101',
+    [`students/${profileId}/coAdvisor2Id`]: 'CUSTOM-อ. ทดสอบ',
+  });
+  acknowledgeCoAdvisors(); await coAdvisorSave;
+  assert.equal(dbStore.getStudentById(profileId).coAdvisorId, 'T-101');
+  assert.equal(dbStore.getStudentById(profileId).coAdvisor2Id, 'CUSTOM-อ. ทดสอบ');
+  write = async () => {};
+  await dbStore.saveProfile('student', profileId, { coAdvisorId: '', coAdvisor2Id: '' });
+  assert.deepEqual(lastChanges, { [`students/${profileId}/coAdvisorId`]: '', [`students/${profileId}/coAdvisor2Id`]: '' });
+  assert.equal(dbStore.getStudentById(profileId).coAdvisorId, '');
+  assert.equal(dbStore.getStudentById(profileId).coAdvisor2Id, '');
+  assert.equal(dbStore.getStudentById(profileId).advisorId, originalAdvisor);
+  console.log('[PASS] optional co-advisors use acknowledged partial writes; rejection preserves state and empty values clear both without changing primary advisor');
+  write = async () => { throw new Error('PERMISSION_DENIED'); };
   await assert.rejects(persistChanges({ 'projectDocuments/test/status': 'approved' }), /PERMISSION_DENIED/);
   console.log('[PASS] persistence failures propagate to document callers');
 

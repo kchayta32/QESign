@@ -46,7 +46,8 @@ export interface Student extends AccountSecurity {
   yearLevel: number; // 1-8 (derived from the enrolment year in the student code)
   status: 'active' | 'graduated' | 'suspended';
   advisorId: string; // Teacher id, "CUSTOM-<name>" for an external advisor, or "" when unassigned
-  coAdvisorId?: string;
+  coAdvisorId?: string; // Optional co-advisor 1; same id/CUSTOM-/empty convention as advisorId
+  coAdvisor2Id?: string; // Optional co-advisor 2
   projectTitleTh?: string;
   projectTitleEn?: string;
   passed3Chapter: boolean; // 3-chapter exam passed — set when the advisor approves the chapter3 document (QE prerequisite)

@@ -240,6 +240,12 @@ function StudentProfileForm({
   const initialCustom = student.advisorId?.startsWith("CUSTOM-");
   const [advisorId, setAdvisorId] = useState<string>(initialCustom ? "OTHER" : student.advisorId || "");
   const [customAdvisor, setCustomAdvisor] = useState(initialCustom ? student.advisorId.replace("CUSTOM-", "") : "");
+  const [coAdvisors, setCoAdvisors] = useState(() => [student.coAdvisorId, student.coAdvisor2Id].map((id) => ({
+    id: id?.startsWith("CUSTOM-") ? "OTHER" : id || "",
+    custom: id?.startsWith("CUSTOM-") ? id.slice("CUSTOM-".length) : "",
+  })));
+  const updateCoAdvisor = (index: number, updates: Partial<{ id: string; custom: string }>) =>
+    setCoAdvisors((previous) => previous.map((advisor, i) => i === index ? { ...advisor, ...updates } : advisor));
   const [projectTitleTh, setProjectTitleTh] = useState(student.projectTitleTh || "");
   const [projectTitleEn, setProjectTitleEn] = useState(student.projectTitleEn || "");
   const [avatar, setAvatar] = useState(student.avatarUrl || "");
@@ -257,6 +263,9 @@ function StudentProfileForm({
     if (!phone.trim()) return setError("กรุณากรอกเบอร์โทรศัพท์ติดต่อ");
     if (!advisorId) return setError("กรุณาเลือกอาจารย์ที่ปรึกษาโครงงาน");
     if (advisorId === "OTHER" && !customAdvisor.trim()) return setError("กรุณาระบุชื่ออาจารย์ที่ปรึกษา");
+    const missingCoAdvisor = coAdvisors.findIndex((advisor) => advisor.id === "OTHER" && !advisor.custom.trim());
+    if (missingCoAdvisor >= 0) return setError(`กรุณาระบุชื่ออาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ ${missingCoAdvisor + 1} หรือเลือกไม่ระบุ`);
+    const coAdvisorIds = coAdvisors.map((advisor) => advisor.id === "OTHER" ? `CUSTOM-${advisor.custom.trim()}` : advisor.id);
     const pwError = validatePasswordPair(newPassword, confirmPassword);
     if (pwError) return setError(pwError);
 
@@ -278,6 +287,9 @@ function StudentProfileForm({
           trackId,
           yearLevel,
           advisorId: advisorId === "OTHER" ? `CUSTOM-${customAdvisor.trim()}` : advisorId,
+          // Empty strings explicitly clear saved assignments; undefined would be omitted.
+          coAdvisorId: coAdvisorIds[0],
+          coAdvisor2Id: coAdvisorIds[1],
           projectTitleTh: projectTitleTh.trim(),
           projectTitleEn: projectTitleEn.trim(),
           avatarUrl: avatarUrl || "",
@@ -373,8 +385,8 @@ function StudentProfileForm({
         </div>
 
         <div>
-          <label className={labelCls}>อาจารย์ที่ปรึกษาโครงงาน *</label>
-          <select value={advisorId} onChange={(e) => setAdvisorId(e.target.value)} className={inputCls} required>
+          <label htmlFor="project-advisor" className={labelCls}>อาจารย์ที่ปรึกษาโครงงาน *</label>
+          <select id="project-advisor" value={advisorId} onChange={(e) => setAdvisorId(e.target.value)} className={inputCls} required>
             <option value="">— เลือกอาจารย์ที่ปรึกษา —</option>
             {teachers.map((t, i) => (
               <option key={t.id} value={t.id}>
@@ -386,6 +398,31 @@ function StudentProfileForm({
           {advisorId === "OTHER" && (
             <input value={customAdvisor} onChange={(e) => setCustomAdvisor(e.target.value)} placeholder="ระบุชื่อ-สกุล และตำแหน่งทางวิชาการของอาจารย์ที่ปรึกษา" className={`${inputCls} mt-2`} />
           )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {coAdvisors.map((advisor, index) => (
+            <div key={index}>
+              <label htmlFor={`co-advisor-${index + 1}`} className={labelCls}>
+                อาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ {index + 1} (ถ้ามี)
+              </label>
+              <select id={`co-advisor-${index + 1}`} value={advisor.id} onChange={(e) => updateCoAdvisor(index, { id: e.target.value })} className={inputCls}>
+                <option value="">— ไม่ระบุ —</option>
+                {teachers.map((t, i) => (
+                  <option key={t.id} value={t.id}>
+                    {i + 1}. {t.prefixTh}{t.firstNameTh} {t.lastNameTh} ({t.department || "วิศวกรรมคอมพิวเตอร์"})
+                  </option>
+                ))}
+                <option value="OTHER">อื่น ๆ (ระบุ)</option>
+              </select>
+              {advisor.id === "OTHER" && (
+                <div className="mt-2">
+                  <label htmlFor={`custom-co-advisor-${index + 1}`} className={labelCls}>ชื่อ-สกุลและตำแหน่งอาจารย์ร่วม คนที่ {index + 1}</label>
+                  <input id={`custom-co-advisor-${index + 1}`} value={advisor.custom} onChange={(e) => updateCoAdvisor(index, { custom: e.target.value })} className={inputCls} />
+                </div>
+              )}
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 gap-3">

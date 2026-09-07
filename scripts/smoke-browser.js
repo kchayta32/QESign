@@ -115,18 +115,96 @@ let browser, socket, send;
         input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
       })()`);
       await until("!!document.querySelector('img[src^=\"data:image/jpeg\"]')");
+      if (role === 'student') {
+        assert.deepEqual(await evaluate(`[1, 2].map(i => {
+          const select = document.getElementById('co-advisor-' + i);
+          return { value: select.value, required: select.required, labelled: !!select.labels.length,
+            sameOptions: JSON.stringify(Array.from(select.options).slice(1).map(o => [o.value, o.text])) ===
+              JSON.stringify(Array.from(document.getElementById('project-advisor').options).slice(1).map(o => [o.value, o.text])) };
+        })`), [1, 2].map(() => ({ value: '', required: false, labelled: true, sameOptions: true })));
+      }
       const start = performance.now();
       await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('บันทึกและเริ่มใช้งานระบบ')).click(); true");
       await until("!Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('บันทึกและเริ่มใช้งานระบบ') || b.textContent.includes('กำลังบันทึก'))");
       const ms = Math.round(performance.now() - start);
       const saved = (await get(ref(rtdb, `${RTDB_ROOT}/${role === 'student' ? 'students' : 'teachers'}/${id}`))).val();
       assert.equal(saved.profileCompleted, true);
+      if (role === 'student') {
+        assert.equal(saved.coAdvisorId, ''); assert.equal(saved.coAdvisor2Id, '');
+        console.log('[PASS] student first-profile saves with both optional co-advisors blank; dropdowns have labels and identical advisor choices');
+      }
       assert.ok(saved.avatarUrl?.startsWith('avatar://') || saved.avatarUrl?.startsWith('data:image/jpeg'));
       assert.ok(ms < 10000, 'profile save must not wait for Storage SDK retries');
       console.log(`[PASS] browser ${role} profile + resized image saved and cloud-confirmed in ${ms} ms`);
     }
     await evaluate(`localStorage.setItem('SSRU_CE_AUTH_SESSION_V2', JSON.stringify(${JSON.stringify({ role: 'student', entityId: studentId })})); location.reload(); true`);
-    await until(`!!document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]')`);
+    const openProfile = async () => {
+      await until(`!!document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]')`);
+      await evaluate(`Array.from(document.querySelectorAll('header button')).find(b => b.querySelector('svg.lucide-chevron-down')).click(); true`);
+      await until(`Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'แก้ไขข้อมูลโปรไฟล์')`);
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'แก้ไขข้อมูลโปรไฟล์').click(); true`);
+      await until(`!!document.getElementById('co-advisor-2')`);
+    };
+    const setControl = async (id, value) => {
+      await evaluate(`(() => {
+        const input = document.getElementById(${JSON.stringify(id)});
+        Object.getOwnPropertyDescriptor(input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
+        input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      })()`);
+    };
+    const saveProfile = async (coAdvisorId, coAdvisor2Id) => {
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'บันทึกข้อมูล').click(); true`);
+      await until(`!document.getElementById('co-advisor-2')`);
+      const saved = (await get(ref(rtdb, `${RTDB_ROOT}/students/${studentId}`))).val();
+      assert.equal(saved.coAdvisorId, coAdvisorId); assert.equal(saved.coAdvisor2Id, coAdvisor2Id);
+      await evaluate('location.reload(); true');
+      await openProfile();
+      for (const [index, id] of [coAdvisorId, coAdvisor2Id].entries()) {
+        assert.equal(await evaluate(`document.getElementById('co-advisor-${index + 1}').value`), id.startsWith('CUSTOM-') ? 'OTHER' : id);
+        if (id.startsWith('CUSTOM-')) assert.equal(await evaluate(`document.getElementById('custom-co-advisor-${index + 1}').value`), id.slice(7));
+      }
+    };
+    await openProfile();
+    await setControl('co-advisor-1', teacherId);
+    await saveProfile(teacherId, '');
+    console.log('[PASS] one co-advisor persists after browser save/reload while second remains optional');
+    await setControl('co-advisor-1', 'T-101');
+    await setControl('co-advisor-2', teacherId);
+    await saveProfile('T-101', teacherId);
+    await evaluate(`document.getElementById('co-advisor-2').scrollIntoView({ block: 'center' }); true`);
+    await capture('production-co-advisors');
+    await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('[id^="co-advisor-"]')).every(el => {
+      const r = el.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= window.innerWidth;
+    })`), 'co-advisor dropdowns fit mobile viewport');
+    await capture('production-co-advisors-mobile');
+    await send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+    console.log('[PASS] both co-advisors persist after reload; profile dropdowns fit a 390px viewport');
+    // The fixture teacher is now ONLY the second co-advisor, not the primary advisor.
+    await setControl('project-advisor', 'T-102');
+    await saveProfile('T-101', teacherId);
+    await evaluate(`localStorage.setItem('SSRU_CE_AUTH_SESSION_V2', JSON.stringify(${JSON.stringify({ role: 'teacher', entityId: teacherId })})); location.reload(); true`);
+    await until(`Array.from(document.querySelectorAll('tbody tr')).some(row => Array.from(row.querySelectorAll('span')).some(s => s.textContent.trim() === ${JSON.stringify(student.studentCode)}) && row.querySelector('button[title^="เปิดเอกสารโครงงาน"]'))`);
+    console.log('[PASS] second co-advisor sees synthetic student in the teacher dashboard without being primary/first advisor');
+    await evaluate(`localStorage.setItem('SSRU_CE_AUTH_SESSION_V2', JSON.stringify(${JSON.stringify({ role: 'student', entityId: studentId })})); location.reload(); true`);
+    await openProfile();
+    await setControl('co-advisor-1', 'OTHER');
+    await setControl('co-advisor-2', 'OTHER');
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'บันทึกข้อมูล').click(); true`);
+    await until(`document.body.innerText.includes('กรุณาระบุชื่ออาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ 1')`);
+    await setControl('custom-co-advisor-1', '  อ. ร่วมหนึ่ง  ');
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'บันทึกข้อมูล').click(); true`);
+    await until(`document.body.innerText.includes('กรุณาระบุชื่ออาจารย์ที่ปรึกษาร่วมโครงงาน คนที่ 2')`);
+    await setControl('custom-co-advisor-2', '  อ. ร่วมสอง  ');
+    await saveProfile('CUSTOM-อ. ร่วมหนึ่ง', 'CUSTOM-อ. ร่วมสอง');
+    await setControl('co-advisor-1', '');
+    await saveProfile('', 'CUSTOM-อ. ร่วมสอง');
+    await setControl('co-advisor-2', '');
+    await setControl('project-advisor', teacherId);
+    await saveProfile('', '');
+    console.log('[PASS] custom names required only for Other, trimmed and restored; either optional assignment can be cleared durably');
+    await evaluate(`document.querySelector('button[aria-label="ปิด"]').click(); true`);
+    await until(`!document.getElementById('co-advisor-2')`);
     await evaluate(`document.querySelector('button[title="เปิดเมนูเอกสารโครงงาน"]').click(); true`);
     await until("document.body.innerText.includes('เอกสารโครงงาน: Proposal')");
     await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'ส่งเอกสาร (.pdf)').click(); true");
